@@ -221,6 +221,17 @@ export default function App() {
         return;
       }
 
+      // Check for default user login (cauateles651@gmail.com / 1234)
+      if (loginEmail.trim().toLowerCase() === 'cauateles651@gmail.com' && loginPassword === '1234') {
+        const defaultUser: User = {
+          id: 'caua-user-id',
+          name: 'Cauã Teles',
+          email: 'cauateles651@gmail.com'
+        };
+        setCurrentUser(defaultUser);
+        return;
+      }
+
       const users = JSON.parse(localStorage.getItem('fintrack_users') || '[]');
       const user = users.find((u: any) => u.email === loginEmail && u.password === loginPassword);
       if (user) {
@@ -308,10 +319,16 @@ export default function App() {
               {isRegistering ? 'Já tenho uma conta local' : 'Não tenho conta local ainda'}
             </button>
             {!isRegistering && (
-              <p className="text-gray-300 uppercase tracking-widest leading-relaxed pt-3 border-t border-black/5">
-                Acesso Administrativo:<br/>
-                <span className="text-black font-black">usuário: adm • senha: adm</span>
-              </p>
+              <div className="space-y-2 pt-3 border-t border-black/5 text-gray-300 uppercase tracking-widest leading-relaxed">
+                <p>
+                  Acesso Administrativo:<br/>
+                  <span className="text-black font-black">usuário: adm • senha: adm</span>
+                </p>
+                <p className="text-[9px]">
+                  Acesso Padrão:<br/>
+                  <span className="text-black font-black">e-mail: cauateles651@gmail.com • senha: 1234</span>
+                </p>
+              </div>
             )}
           </div>
         </motion.div>
