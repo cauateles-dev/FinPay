@@ -210,6 +210,17 @@ export default function App() {
       localStorage.setItem('fintrack_users', JSON.stringify([...users, { ...newUser, password: loginPassword }]));
       setCurrentUser(newUser);
     } else {
+      // Check for default admin login (adm / adm)
+      if (loginEmail.trim().toLowerCase() === 'adm' && loginPassword === 'adm') {
+        const adminUser: User = {
+          id: 'admin-id',
+          name: 'Administrador adm',
+          email: 'adm'
+        };
+        setCurrentUser(adminUser);
+        return;
+      }
+
       const users = JSON.parse(localStorage.getItem('fintrack_users') || '[]');
       const user = users.find((u: any) => u.email === loginEmail && u.password === loginPassword);
       if (user) {
@@ -259,13 +270,13 @@ export default function App() {
               </div>
             )}
             <div>
-              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-3 ml-1">E-mail</label>
+              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-3 ml-1">Usuário ou E-mail</label>
               <input 
                 required
-                type="email" 
+                type="text" 
                 value={loginEmail}
                 onChange={(e) => setLoginEmail(e.target.value)}
-                placeholder="seu@email.com"
+                placeholder="adm ou seu@email.com"
                 className="w-full bg-[#F9F9F9] border-none rounded-3xl px-8 py-5 focus:ring-4 focus:ring-black/5 outline-none transition-all placeholder:text-gray-300 font-black text-lg"
               />
             </div>
@@ -289,13 +300,19 @@ export default function App() {
             </button>
           </form>
 
-          <div className="mt-8 text-center text-[10px] font-black">
+          <div className="mt-8 text-center text-[10px] font-black space-y-4">
             <button 
               onClick={() => setIsRegistering(!isRegistering)}
               className="text-gray-400 hover:text-black uppercase tracking-[0.2em] transition-colors cursor-pointer"
             >
               {isRegistering ? 'Já tenho uma conta local' : 'Não tenho conta local ainda'}
             </button>
+            {!isRegistering && (
+              <p className="text-gray-300 uppercase tracking-widest leading-relaxed pt-3 border-t border-black/5">
+                Acesso Administrativo:<br/>
+                <span className="text-black font-black">usuário: adm • senha: adm</span>
+              </p>
+            )}
           </div>
         </motion.div>
       </div>
