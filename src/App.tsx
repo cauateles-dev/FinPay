@@ -33,6 +33,7 @@ import { ptBR } from 'date-fns/locale';
 
 import { Transaction, TransactionType, CATEGORIES, CATEGORY_COLORS } from './types';
 import { cn, formatCurrency, formatDate } from './lib/utils';
+import { supabase } from './supabase';
 
 export default function App() {
   const [transactions, setTransactions] = useState<Transaction[]>(() => {
@@ -44,6 +45,8 @@ export default function App() {
     }
   });
   
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
 
@@ -56,9 +59,46 @@ export default function App() {
   const [type, setType] = useState<TransactionType>('EXPENSE');
   const [category, setCategory] = useState(CATEGORIES.EXPENSE[0]);
 
+  // Sync state to local cache
   useEffect(() => {
     localStorage.setItem('fintrack_data', JSON.stringify(transactions));
   }, [transactions]);
+
+  // Helper trigger to retry loading from Supabase
+  const loadTransactions = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const { data, error: fetchError } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('date', { ascending: false });
+
+      if (fetchError) throw fetchError;
+
+      if (data) {
+        const restored: Transaction[] = data.map(item => ({
+          id: item.id,
+          description: item.description,
+          amount: Number(item.amount),
+          type: item.type as TransactionType,
+          category: item.category,
+          date: item.date
+        }));
+        setTransactions(restored);
+      }
+    } catch (err: any) {
+      console.error('Erro ao conectar com o Supabase:', err);
+      setError('Aviso: exibindo dados do cache local offline.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Sync Supabase on initial render
+  useEffect(() => {
+    loadTransactions();
+  }, []);
 
   const filteredTransactions = useMemo(() => {
     const start = startOfMonth(selectedDate);
@@ -142,13 +182,14 @@ export default function App() {
   
   const handleNextMonth = () => setSelectedDate(prev => addMonths(prev, 1));
 
-  const handleAddTransaction = (e: React.FormEvent) => {
+  const handleAddTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
     const numAmount = parseFloat(amount);
     if (!description || isNaN(numAmount) || numAmount <= 0) return;
 
+    const newId = Math.random().toString(36).substr(2, 9);
     const newTransaction: Transaction = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: newId,
       description,
       amount: numAmount,
       type,
@@ -156,14 +197,49 @@ export default function App() {
       date: new Date().toISOString()
     };
 
-    setTransactions([newTransaction, ...transactions]);
+    // Optimistically update locally
+    setTransactions(prev => [newTransaction, ...prev]);
     setDescription('');
     setAmount('');
     setIsModalOpen(false);
+
+    try {
+      const { error: insertError } = await supabase
+        .from('transactions')
+        .insert({
+          id: newTransaction.id,
+          description: newTransaction.description,
+          amount: newTransaction.amount,
+          type: newTransaction.type,
+          category: newTransaction.category,
+          date: newTransaction.date
+        });
+      if (insertError) throw insertError;
+    } catch (err) {
+      console.error('Erro ao adicionar transação ao Supabase:', err);
+      setError('Erro ao salvar transação no Supabase. Revertendo alteração...');
+      // Revert optimism
+      setTransactions(prev => prev.filter(t => t.id !== newId));
+    }
   };
 
-  const deleteTransaction = (id: string) => {
+  const deleteTransaction = async (id: string) => {
+    const previousTransactions = [...transactions];
+    // Optimistically delete locally
     setTransactions(prev => prev.filter(t => t.id !== id));
+
+    try {
+      const { error: deleteError } = await supabase
+        .from('transactions')
+        .delete()
+        .eq('id', id);
+      if (deleteError) throw deleteError;
+    } catch (err) {
+      console.error('Erro ao deletar transação no Supabase:', err);
+      setError('Erro ao deletar transação do Supabase. Restaurando registro...');
+      // Revert optimism
+      setTransactions(previousTransactions);
+    }
   };
 
   return (
@@ -205,6 +281,54 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* Sync Status Banner */}
+      <div className="max-w-6xl mx-auto px-6 mb-8">
+        <AnimatePresence mode="wait">
+          {isLoading ? (
+            <motion.div 
+              key="loading"
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="flex items-center gap-2 bg-gray-50 border border-black/5 text-[#1a1a1a] px-5 py-3 rounded-2xl text-[10px] uppercase font-black tracking-widest inline-flex"
+            >
+              <span className="w-1.5 h-1.5 bg-[#1a1a1a] rounded-full animate-ping shrink-0" />
+              Sincronizando com o Supabase...
+            </motion.div>
+          ) : error ? (
+            <motion.div 
+              key="error"
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="flex items-center justify-between gap-3 bg-[#FFFBEB] border border-[#FDE68A] text-[#92400E] px-5 py-3 rounded-2xl text-[10px] uppercase font-black tracking-widest"
+            >
+              <div className="flex items-center gap-2">
+                <AlertCircle size={14} className="text-[#B45309] shrink-0" />
+                <span>{error}</span>
+              </div>
+              <button 
+                type="button"
+                onClick={loadTransactions}
+                className="hover:underline transition-all cursor-pointer font-black text-[#B45309] uppercase shrink-0"
+              >
+                Tentar Sincronizar
+              </button>
+            </motion.div>
+          ) : (
+            <motion.div 
+              key="synced"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex items-center gap-2 text-[9px] uppercase font-bold text-gray-400 tracking-widest pl-1"
+            >
+              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full shrink-0" />
+              Sincronizado com Supabase
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       <main className="max-w-6xl mx-auto px-6 grid grid-cols-1 lg:grid-cols-12 gap-10">
         {/* Left Column: Transactions */}
