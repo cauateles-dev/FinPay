@@ -11,26 +11,32 @@ CREATE TABLE IF NOT EXISTS transactions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Habilitar Row Level Security (RLS) para permitir controle de segurança
+-- Adicionar coluna 'user_id' para isolar dados do usuário autenticado no Supabase
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+
+-- Habilitar Row Level Security (RLS) para permitir controle de segurança por usuário
 ALTER TABLE transactions ENABLE ROW LEVEL SECURITY;
 
--- 1. Política para permitir leitura pública de todos os registros
+-- 1. Política para permitir que usuários autenticados leiam APENAS suas próprias transações
+DROP POLICY IF EXISTS "Permitir leitura ao proprietário" ON transactions;
 DROP POLICY IF EXISTS "Permitir leitura pública" ON transactions;
-CREATE POLICY "Permitir leitura pública" 
+CREATE POLICY "Permitir leitura ao proprietário" 
 ON transactions FOR SELECT 
-TO public 
-USING (true);
+TO authenticated
+USING (auth.uid() = user_id);
 
--- 2. Política para permitir inserção pública de registros
+-- 2. Política para permitir que usuários autenticados insiram suas próprias transações
+DROP POLICY IF EXISTS "Permitir inserção ao proprietário" ON transactions;
 DROP POLICY IF EXISTS "Permitir inserção pública" ON transactions;
-CREATE POLICY "Permitir inserção pública" 
+CREATE POLICY "Permitir inserção ao proprietário" 
 ON transactions FOR INSERT 
-TO public 
-WITH CHECK (true);
+TO authenticated 
+WITH CHECK (auth.uid() = user_id);
 
--- 3. Política para permitir exclusão pública de registros por ID
+-- 3. Política para permitir que usuários autenticados excluam suas próprias transações
+DROP POLICY IF EXISTS "Permitir exclusão ao proprietário" ON transactions;
 DROP POLICY IF EXISTS "Permitir exclusão pública" ON transactions;
-CREATE POLICY "Permitir exclusão pública" 
+CREATE POLICY "Permitir exclusão ao proprietário" 
 ON transactions FOR DELETE 
-TO public 
-USING (true);
+TO authenticated 
+USING (auth.uid() = user_id);

@@ -16,14 +16,23 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
-  X
+  X,
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
+  Check,
+  ArrowLeft,
+  LogOut,
+  Key,
+  Shield,
+  HelpCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   BarChart, 
   Bar, 
   XAxis, 
-  YAxis, 
   Tooltip, 
   ResponsiveContainer,
   Cell
@@ -36,15 +45,7 @@ import { cn, formatCurrency, formatDate } from './lib/utils';
 import { supabase } from './supabase';
 
 export default function App() {
-  const [transactions, setTransactions] = useState<Transaction[]>(() => {
-    try {
-      const saved = localStorage.getItem('fintrack_data');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-  
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -59,19 +60,71 @@ export default function App() {
   const [type, setType] = useState<TransactionType>('EXPENSE');
   const [category, setCategory] = useState(CATEGORIES.EXPENSE[0]);
 
-  // Sync state to local cache
+  // Auth States
+  const [user, setUser] = useState<any>(null);
+  const [userLoading, setUserLoading] = useState(true);
+  const [isDemoMode, setIsDemoMode] = useState(false);
+
+  // Auth Form States
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authName, setAuthName] = useState('');
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot' | 'reset'>('login');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authSuccess, setAuthSuccess] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+
+  // Guard Confirmation States
+  const [isConfirmingAdd, setIsConfirmingAdd] = useState(false);
+  const [transactionToDelete, setTransactionToDelete] = useState<Transaction | null>(null);
+
+  // Listen to Auth State Changes
   useEffect(() => {
-    localStorage.setItem('fintrack_data', JSON.stringify(transactions));
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setUserLoading(false);
+    }).catch(err => {
+      console.error('Erro de sessão Supabase:', err);
+      setUserLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      setUser(session?.user ?? null);
+      if (event === 'PASSWORD_RECOVERY') {
+        setAuthMode('reset');
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // Sync state to local cache as backup
+  useEffect(() => {
+    if (transactions.length > 0) {
+      localStorage.setItem('fintrack_data', JSON.stringify(transactions));
+    }
   }, [transactions]);
 
-  // Helper trigger to retry loading from Supabase
+  // Load Transactions from Supabase or LocalStorage
   const loadTransactions = async () => {
+    if (!user) return;
     try {
       setIsLoading(true);
       setError(null);
+
+      if (isDemoMode) {
+        const saved = localStorage.getItem('fintrack_data');
+        setTransactions(saved ? JSON.parse(saved) : []);
+        return;
+      }
+
       const { data, error: fetchError } = await supabase
         .from('transactions')
         .select('*')
+        .eq('user_id', user.id)
         .order('date', { ascending: false });
 
       if (fetchError) throw fetchError;
@@ -90,15 +143,151 @@ export default function App() {
     } catch (err: any) {
       console.error('Erro ao conectar com o Supabase:', err);
       setError('Aviso: exibindo dados do cache local offline.');
+      // Fallback to cache
+      const saved = localStorage.getItem('fintrack_data');
+      if (saved) setTransactions(JSON.parse(saved));
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Sync Supabase on initial render
   useEffect(() => {
-    loadTransactions();
-  }, []);
+    if (user) {
+      loadTransactions();
+    } else {
+      setTransactions([]);
+    }
+  }, [user, isDemoMode]);
+
+  // Password Security Strength Validation Rules checker (Cybersecurity Standard)
+  const passwordStrength = useMemo(() => {
+    const pass = authPassword;
+    return {
+      hasMinLen: pass.length >= 8,
+      hasUpper: /[A-Z]/.test(pass),
+      hasLower: /[a-z]/.test(pass),
+      hasNumber: /[0-9]/.test(pass),
+      hasSpecial: /[^A-Za-z0-9]/.test(pass)
+    };
+  }, [authPassword]);
+
+  const isPasswordStrong = useMemo(() => {
+    return (
+      passwordStrength.hasMinLen &&
+      passwordStrength.hasUpper &&
+      passwordStrength.hasLower &&
+      passwordStrength.hasNumber &&
+      passwordStrength.hasSpecial
+    );
+  }, [passwordStrength]);
+
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    setAuthSuccess(null);
+    setAuthSubmitting(true);
+
+    try {
+      if (authMode === 'login') {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: authEmail,
+          password: authPassword
+        });
+        if (signInError) throw signInError;
+        setAuthSuccess('Acesso concedido com sucesso!');
+      } else if (authMode === 'register') {
+        if (!isPasswordStrong) {
+          throw new Error('A sua senha não atende a todos os critérios de resiliência cibernética.');
+        }
+
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email: authEmail,
+          password: authPassword,
+          options: {
+            data: {
+              name: authName
+            }
+          }
+        });
+        if (signUpError) throw signUpError;
+
+        if (data.session) {
+          setAuthSuccess('Cadastro efetuado e login concedido com sucesso!');
+        } else {
+          setAuthSuccess('Cadastro efetuado! Um link de validação cibernética foi enviado ao seu e-mail.');
+        }
+      } else if (authMode === 'forgot') {
+        const { error: resetError } = await supabase.auth.resetPasswordForEmail(authEmail, {
+          redirectTo: window.location.origin
+        });
+        if (resetError) throw resetError;
+        setAuthSuccess('Instruções de redefinição seguras enviadas para seu e-mail!');
+      } else if (authMode === 'reset') {
+        if (!isPasswordStrong) {
+          throw new Error('A sua nova senha não atende a todos os critérios de resiliência cibernética.');
+        }
+
+        const { error: updateError } = await supabase.auth.updateUser({
+          password: authPassword
+        });
+        if (updateError) throw updateError;
+        setAuthSuccess('Senha atualizada com sucesso! Redirecionando para login...');
+        setTimeout(() => {
+          setAuthMode('login');
+          setAuthPassword('');
+        }, 3000);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setAuthError(err.message || 'Ocorreu um erro ao validar credenciais.');
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const enterDemoMode = () => {
+    setIsDemoMode(true);
+    setUser({
+      id: 'demo-local-user',
+      email: 'convidado@fintrack.local',
+      user_metadata: { name: 'Convidado Local' }
+    });
+    // Set typical sample transaction if empty
+    const saved = localStorage.getItem('fintrack_data');
+    if (!saved || JSON.parse(saved).length === 0) {
+      const sample: Transaction[] = [
+        {
+          id: 'sample-1',
+          description: 'Aporte de Boas-vindas',
+          amount: 5000,
+          type: 'INCOME',
+          category: 'Vendas',
+          date: new Date().toISOString()
+        },
+        {
+          id: 'sample-2',
+          description: 'Serviços em Nuvem',
+          amount: 450.90,
+          type: 'EXPENSE',
+          category: 'Contas',
+          date: new Date().toISOString()
+        }
+      ];
+      localStorage.setItem('fintrack_data', JSON.stringify(sample));
+      setTransactions(sample);
+    } else {
+      setTransactions(JSON.parse(saved));
+    }
+  };
+
+  const handleLogout = async () => {
+    if (!isDemoMode) {
+      await supabase.auth.signOut();
+    }
+    setUser(null);
+    setIsDemoMode(false);
+    setTransactions([]);
+  };
 
   const filteredTransactions = useMemo(() => {
     const start = startOfMonth(selectedDate);
@@ -116,7 +305,6 @@ export default function App() {
   }, [transactions, searchTerm, selectedDate]);
 
   const stats = useMemo(() => {
-    // Overall Balance
     const totalIncome = transactions
       .filter(t => t.type === 'INCOME')
       .reduce((acc, t) => acc + t.amount, 0);
@@ -124,7 +312,6 @@ export default function App() {
       .filter(t => t.type === 'EXPENSE')
       .reduce((acc, t) => acc + t.amount, 0);
 
-    // Monthly Stats
     const start = startOfMonth(selectedDate);
     const end = endOfMonth(selectedDate);
     
@@ -182,11 +369,16 @@ export default function App() {
   
   const handleNextMonth = () => setSelectedDate(prev => addMonths(prev, 1));
 
-  const handleAddTransaction = async (e: React.FormEvent) => {
+  // Confirming Transaction Step (custom inline double check dialog within modal)
+  const handleAddTransactionSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const numAmount = parseFloat(amount);
     if (!description || isNaN(numAmount) || numAmount <= 0) return;
+    setIsConfirmingAdd(true); // Open recap guard validation
+  };
 
+  const handleAddTransactionConfirm = async () => {
+    const numAmount = parseFloat(amount);
     const newId = Math.random().toString(36).substr(2, 9);
     const newTransaction: Transaction = {
       id: newId,
@@ -197,87 +389,326 @@ export default function App() {
       date: new Date().toISOString()
     };
 
-    // Optimistically update locally
+    // Optimistically update
     setTransactions(prev => [newTransaction, ...prev]);
     setDescription('');
     setAmount('');
+    setIsConfirmingAdd(false);
     setIsModalOpen(false);
 
-    try {
-      const { error: insertError } = await supabase
-        .from('transactions')
-        .insert({
-          id: newTransaction.id,
-          description: newTransaction.description,
-          amount: newTransaction.amount,
-          type: newTransaction.type,
-          category: newTransaction.category,
-          date: newTransaction.date
-        });
-      if (insertError) throw insertError;
-    } catch (err) {
-      console.error('Erro ao adicionar transação ao Supabase:', err);
-      setError('Erro ao salvar transação no Supabase. Revertendo alteração...');
-      // Revert optimism
-      setTransactions(prev => prev.filter(t => t.id !== newId));
+    if (user && !isDemoMode) {
+      try {
+        const { error: insertError } = await supabase
+          .from('transactions')
+          .insert({
+            id: newTransaction.id,
+            description: newTransaction.description,
+            amount: newTransaction.amount,
+            type: newTransaction.type,
+            category: newTransaction.category,
+            date: newTransaction.date,
+            user_id: user.id
+          });
+        if (insertError) throw insertError;
+      } catch (err) {
+        console.error('Erro ao adicionar transação:', err);
+        setError('Erro ao salvar no banco. Revertendo alteração local...');
+        setTransactions(prev => prev.filter(t => t.id !== newId));
+      }
     }
   };
 
   const deleteTransaction = async (id: string) => {
     const previousTransactions = [...transactions];
-    // Optimistically delete locally
     setTransactions(prev => prev.filter(t => t.id !== id));
+    setTransactionToDelete(null);
 
-    try {
-      const { error: deleteError } = await supabase
-        .from('transactions')
-        .delete()
-        .eq('id', id);
-      if (deleteError) throw deleteError;
-    } catch (err) {
-      console.error('Erro ao deletar transação no Supabase:', err);
-      setError('Erro ao deletar transação do Supabase. Restaurando registro...');
-      // Revert optimism
-      setTransactions(previousTransactions);
+    if (user && !isDemoMode) {
+      try {
+        const { error: deleteError } = await supabase
+          .from('transactions')
+          .delete()
+          .eq('id', id);
+        if (deleteError) throw deleteError;
+      } catch (err) {
+        console.error('Erro ao deletar transação no Supabase:', err);
+        setError('Erro ao deletar do banco. Restaurando registro...');
+        setTransactions(previousTransactions);
+      }
     }
   };
+
+  // Render initial loader block
+  if (userLoading) {
+    return (
+      <div className="min-h-screen bg-[#FDFDFD] flex items-center justify-center p-6 font-sans">
+        <div className="text-center space-y-4">
+          <div className="w-12 h-12 border-4 border-black border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Iniciando ambiente seguro...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Render login screen if no user authenticated
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-[#FDFDFD] font-sans text-[#1A1A1A] flex items-center justify-center p-6">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-md bg-white p-10 rounded-[40px] shadow-2xl border border-black/5"
+        >
+          <div className="text-center mb-10">
+            <div className="w-16 h-16 bg-black text-white rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl relative overflow-hidden group">
+              <Wallet size={32} />
+              <div className="absolute inset-0 bg-white/20 -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
+            </div>
+            <h1 className="text-4xl font-black tracking-tighter uppercase leading-none mb-1">FinPay</h1>
+          </div>
+
+          <AnimatePresence mode="wait">
+            {authError && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="mb-6 p-4 bg-rose-50 border border-rose-100 text-rose-800 rounded-2xl text-xs flex items-start gap-2.5 font-bold"
+              >
+                <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                <span>{authError}</span>
+              </motion.div>
+            )}
+
+            {authSuccess && (
+              <motion.div 
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="mb-6 p-4 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-2xl text-xs flex items-start gap-2.5 font-bold"
+              >
+                <Check size={14} className="shrink-0 mt-0.5" />
+                <span>{authSuccess}</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <form onSubmit={handleAuthSubmit} className="space-y-6">
+            {authMode === 'register' && (
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
+                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-2 ml-1">Nome Completo</label>
+                <div className="relative">
+                  <input 
+                    required
+                    type="text" 
+                    value={authName}
+                    onChange={(e) => setAuthName(e.target.value)}
+                    placeholder="Nome completo"
+                    className="w-full bg-[#F9F9F9] border border-black/5 rounded-3xl px-6 py-4.5 focus:ring-4 focus:ring-black/5 outline-none transition-all placeholder:text-gray-300 font-extrabold text-sm"
+                  />
+                </div>
+              </motion.div>
+            )}
+
+            {authMode !== 'reset' && (
+              <div>
+                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-2 ml-1 font-sans">Endereço de E-mail</label>
+                <div className="relative">
+                  <span className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-400"><Mail size={16} /></span>
+                  <input 
+                    required
+                    type="email" 
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    placeholder="voce@exemplo.com"
+                    className="w-full bg-[#F9F9F9] border border-black/5 rounded-3xl pl-14 pr-6 py-4.5 focus:ring-4 focus:ring-black/5 outline-none transition-all placeholder:text-gray-300 font-extrabold text-sm"
+                  />
+                </div>
+              </div>
+            )}
+
+            {(authMode === 'login' || authMode === 'register' || authMode === 'reset') && (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] ml-1">
+                    {authMode === 'reset' ? 'Nova Senha' : 'Senha de Acesso'}
+                  </label>
+                  {authMode === 'login' && (
+                    <button 
+                      type="button" 
+                      onClick={() => setAuthMode('forgot')}
+                      className="text-[10px] font-black uppercase text-amber-600 hover:underline tracking-widest transition-all"
+                    >
+                      Esqueceu?
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <span className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-400"><Lock size={16} /></span>
+                  <input 
+                    required
+                    type={showPassword ? "text" : "password"} 
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    placeholder="••••••••••••"
+                    className="w-full bg-[#F9F9F9] border border-black/5 rounded-3xl pl-14 pr-14 py-4.5 focus:ring-4 focus:ring-black/5 outline-none transition-all placeholder:text-gray-300 font-extrabold text-sm"
+                  />
+                  <button 
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-6 top-1/2 -translate-y-1/2 text-gray-400 hover:text-black transition-colors"
+                  >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+
+                {/* CyberSecurity standard guidelines for Strong Password requirements */}
+                {(authMode === 'register' || authMode === 'reset') && authPassword && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mt-4 p-4 bg-[#F9F9F9] rounded-2xl border border-black/5 space-y-2.5"
+                  >
+                    <p className="text-[9px] uppercase font-black text-gray-400 tracking-wider flex items-center gap-1">
+                      <Key size={10} className="text-amber-500" /> Diretriz de Segurança Cibernética:
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1.5 text-[10px] font-black">
+                      <div className="flex items-center gap-1.5">
+                        <span className={cn("w-2 h-2 rounded-full", passwordStrength.hasMinLen ? "bg-emerald-500" : "bg-gray-300")} />
+                        <span className={passwordStrength.hasMinLen ? "text-emerald-700" : "text-gray-400"}>Mínimo 8 caracteres</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className={cn("w-2 h-2 rounded-full", passwordStrength.hasUpper ? "bg-emerald-500" : "bg-gray-300")} />
+                        <span className={passwordStrength.hasUpper ? "text-emerald-700" : "text-gray-400"}>1 Letra maiúscula (A)</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className={cn("w-2 h-2 rounded-full", passwordStrength.hasLower ? "bg-emerald-500" : "bg-gray-300")} />
+                        <span className={passwordStrength.hasLower ? "text-emerald-700" : "text-gray-400"}>1 Letra minúscula (a)</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className={cn("w-2 h-2 rounded-full", passwordStrength.hasNumber ? "bg-emerald-500" : "bg-gray-300")} />
+                        <span className={passwordStrength.hasNumber ? "text-emerald-700" : "text-gray-400"}>1 Número (0-9)</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 md:col-span-2">
+                        <span className={cn("w-2 h-2 rounded-full", passwordStrength.hasSpecial ? "bg-emerald-500" : "bg-gray-300")} />
+                        <span className={passwordStrength.hasSpecial ? "text-emerald-700" : "text-gray-400"}>1 Símbolo especial (!@#$%)</span>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+            )}
+
+            <button 
+              disabled={authSubmitting || ((authMode === 'register' || authMode === 'reset') && !isPasswordStrong)}
+              type="submit"
+              className="w-full py-5 rounded-3xl bg-black text-white font-black uppercase tracking-[0.2em] text-[11px] shadow-xl hover:bg-black/90 transition-all active:scale-[0.98] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {authSubmitting ? (
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <>
+                  <Shield size={12} />
+                  {authMode === 'login' && 'Autenticar com Segurança'}
+                  {authMode === 'register' && 'Registrar Conta Segura'}
+                  {authMode === 'forgot' && 'Enviar Redefinição'}
+                  {authMode === 'reset' && 'Atualizar Minha Senha'}
+                </>
+              )}
+            </button>
+          </form>
+
+          <div className="mt-8 text-center text-[10px] font-black space-y-4">
+            {authMode === 'login' ? (
+              <button 
+                onClick={() => { setAuthMode('register'); setAuthError(null); }}
+                className="text-gray-400 hover:text-black uppercase tracking-[0.2em] transition-colors cursor-pointer"
+              >
+                Criar uma Conta FinPay
+              </button>
+            ) : (
+              <button 
+                onClick={() => { setAuthMode('login'); setAuthError(null); }}
+                className="text-gray-400 hover:text-black uppercase tracking-[0.2em] transition-colors cursor-pointer flex items-center justify-center mx-auto gap-1"
+              >
+                <ArrowLeft size={10} /> Retornar para login
+              </button>
+            )}
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[#FDFDFD] font-sans text-[#1A1A1A] pb-40 overflow-x-hidden">
       {/* Header Section - Sticky */}
       <header className="sticky top-0 z-30 bg-[#FDFDFD]/90 backdrop-blur-md border-b border-black/5 py-8 mb-12 shadow-sm transition-all">
-        <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row md:justify-between md:items-end gap-8">
-          <div className="space-y-4 flex-1 min-w-0">
-            <div className="flex items-center gap-2 md:gap-4">
-              <button 
-                onClick={handlePrevMonth}
-                disabled={startOfMonth(selectedDate) <= startOfMonth(APP_START_DATE)}
-                className="p-2 hover:bg-black/5 rounded-full transition-colors cursor-pointer shrink-0 disabled:opacity-20 disabled:cursor-not-allowed"
-              >
-                <ChevronLeft size={24} />
-              </button>
-              <div className="space-y-1 min-w-0">
-                <p className="text-[10px] uppercase tracking-[0.3em] font-black text-gray-400">Visualizando o período</p>
-                <h1 className="text-4xl md:text-5xl lg:text-6xl font-black tracking-tighter uppercase leading-none break-words">
-                  {format(selectedDate, 'MMMM.yyyy', { locale: ptBR })}
-                </h1>
+        <div className="max-w-6xl mx-auto px-6">
+          {/* User Meta Row (Cybersecurity profile state banner) */}
+          <div className="flex items-center justify-between border-b border-black/5 pb-4 mb-4 gap-4">
+            <div className="flex items-center gap-2">
+              <span className={cn(
+                "w-2 h-2 rounded-full",
+                isDemoMode ? "bg-amber-400" : "bg-emerald-500 animate-pulse"
+              )} />
+              <p className="text-[9px] uppercase font-black text-gray-400 tracking-wider">
+                {isDemoMode ? 'Modo de Demonstração' : 'Conexão Criptografada Ativa'}
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <p className="text-[8px] uppercase tracking-widest font-black text-gray-400">Usuário Autenticado</p>
+                <p className="text-[10px] font-black text-black truncate max-w-[150px] md:max-w-[200px]">
+                  {user?.user_metadata?.name || user?.email}
+                </p>
               </div>
               <button 
-                onClick={handleNextMonth}
-                className="p-2 hover:bg-black/5 rounded-full transition-colors cursor-pointer shrink-0"
+                onClick={handleLogout}
+                className="p-2 ml-1 hover:bg-rose-50 text-rose-500 hover:text-rose-600 rounded-full transition-colors cursor-pointer border border-transparent hover:border-rose-100"
+                title="Desconectar do site"
               >
-                <ChevronRight size={24} />
+                <LogOut size={16} />
               </button>
             </div>
           </div>
-          <div className="md:text-right shrink-0">
-            <p className="text-[10px] uppercase tracking-[0.3em] font-black text-gray-400 mb-2">Saldo Geral</p>
-            <p className={cn(
-              "text-5xl md:text-6xl lg:text-7xl font-black tracking-tighter leading-none transition-colors",
-              stats.balance >= 0 ? "text-emerald-600" : "text-rose-600"
-            )}>
-              {formatCurrency(stats.balance)}
-            </p>
+
+          <div className="flex flex-col md:flex-row md:justify-between md:items-end gap-8">
+            <div className="space-y-4 flex-1 min-w-0">
+              <div className="flex items-center gap-2 md:gap-4">
+                <button 
+                  onClick={handlePrevMonth}
+                  disabled={startOfMonth(selectedDate) <= startOfMonth(APP_START_DATE)}
+                  className="p-2 hover:bg-black/5 rounded-full transition-colors cursor-pointer shrink-0 disabled:opacity-20 disabled:cursor-not-allowed"
+                >
+                  <ChevronLeft size={24} />
+                </button>
+                <div className="space-y-1 min-w-0">
+                  <p className="text-[10px] uppercase tracking-[0.3em] font-black text-gray-400">Visualizando o período</p>
+                  <h1 className="text-4xl md:text-5xl lg:text-6xl font-black tracking-tighter uppercase leading-none break-words">
+                    {format(selectedDate, 'MMMM.yyyy', { locale: ptBR })}
+                  </h1>
+                </div>
+                <button 
+                  onClick={handleNextMonth}
+                  className="p-2 hover:bg-black/5 rounded-full transition-colors cursor-pointer shrink-0"
+                >
+                  <ChevronRight size={24} />
+                </button>
+              </div>
+            </div>
+            <div className="md:text-right shrink-0">
+              <p className="text-[10px] uppercase tracking-[0.3em] font-black text-gray-400 mb-2">Saldo Geral</p>
+              <p className={cn(
+                "text-5xl md:text-6xl lg:text-7xl font-black tracking-tighter leading-none transition-colors",
+                stats.balance >= 0 ? "text-emerald-600" : "text-rose-600"
+              )}>
+                {formatCurrency(stats.balance)}
+              </p>
+            </div>
           </div>
         </div>
       </header>
@@ -302,7 +733,8 @@ export default function App() {
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
-              className="flex items-center justify-between gap-3 bg-[#FFFBEB] border border-[#FDE68A] text-[#92400E] px-5 py-3 rounded-2xl text-[10px] uppercase font-black tracking-widest"
+              className="flex items-center justify-between gap-3 bg-[#FFFBEB] border border-[#FDE68A] text-[#92400E] px-5 py-3 rounded-2xl text-[10px] uppercase font-black tracking-widest cursor-pointer hover:bg-amber-100 transition-colors"
+              onClick={loadTransactions}
             >
               <div className="flex items-center gap-2">
                 <AlertCircle size={14} className="text-[#B45309] shrink-0" />
@@ -390,16 +822,18 @@ export default function App() {
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-4 shrink-0 ml-4">
+                    <div className="flex items-center gap-4 shrink-0 overflow-visible">
                       <span className={cn(
                         "text-xl font-black tracking-tight",
                         t.type === 'INCOME' ? "text-emerald-600" : "text-rose-600"
                       )}>
                         {t.type === 'INCOME' ? '+' : '-'} {formatCurrency(t.amount)}
                       </span>
+                      {/* Trash Bin Icon always visible for clear accessibility */}
                       <button 
-                        onClick={() => deleteTransaction(t.id)}
-                        className="text-gray-200 hover:text-black p-2 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
+                        onClick={() => setTransactionToDelete(t)}
+                        className="text-rose-400 hover:text-rose-600 active:scale-90 p-2.5 transition-all rounded-full hover:bg-rose-50 cursor-pointer duration-200"
+                        title="Deletar este registro"
                       >
                         <Trash2 size={18} />
                       </button>
@@ -410,7 +844,7 @@ export default function App() {
             ) : (
               <div className="py-20 border-2 border-dashed border-gray-200 rounded-3xl flex flex-col items-center justify-center text-gray-300">
                 <Calendar size={48} className="mb-4 opacity-20" />
-                <p className="font-black uppercase tracking-widest text-sm">Nenhuma transação encontrada</p>
+                <p className="font-black uppercase tracking-widest text-sm text-center px-6">Nenhuma transação encontrada</p>
               </div>
             )}
           </div>
@@ -499,8 +933,12 @@ export default function App() {
           Dashboard
         </span>
         <div 
-          onClick={() => setIsModalOpen(true)}
+          onClick={() => {
+            setIsModalOpen(true);
+            setIsConfirmingAdd(false);
+          }}
           className="w-12 h-12 bg-black text-white rounded-full flex items-center justify-center shadow-xl hover:scale-110 active:scale-90 transition-all cursor-pointer group"
+          title="Nova transação"
         >
           <Plus size={24} className="group-hover:rotate-90 transition-transform duration-300" />
         </div>
@@ -524,104 +962,242 @@ export default function App() {
                 exit={{ opacity: 0, scale: 0.9, y: 40 }}
                 className="w-full max-w-lg bg-white rounded-[40px] shadow-2xl pointer-events-auto overflow-hidden border border-black/5"
               >
-                <div className="p-10">
-                  <div className="flex items-center justify-between mb-10">
-                    <h2 className="text-3xl font-black text-black tracking-tighter uppercase leading-none">Novo Registro</h2>
-                    <button onClick={() => setIsModalOpen(false)} className="p-3 hover:bg-black/5 rounded-full transition-colors cursor-pointer text-black">
-                      <X size={28} />
-                    </button>
-                  </div>
-
-                  <form onSubmit={handleAddTransaction} className="space-y-8">
-                    {/* Type Selector */}
-                    <div className="flex bg-gray-100 p-2 rounded-3xl">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setType('EXPENSE');
-                          setCategory(CATEGORIES.EXPENSE[0]);
-                        }}
-                        className={cn(
-                          "flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all cursor-pointer",
-                          type === 'EXPENSE' ? "bg-black text-white shadow-lg" : "text-gray-400"
-                        )}
-                      >
-                        Saída
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setType('INCOME');
-                          setCategory(CATEGORIES.INCOME[0]);
-                        }}
-                        className={cn(
-                          "flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all cursor-pointer",
-                          type === 'INCOME' ? "bg-black text-white shadow-lg" : "text-gray-400"
-                        )}
-                      >
-                        Entrada
-                      </button>
-                    </div>
-
-                    <div className="space-y-6">
-                      <div>
-                        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-3 ml-1">Descrição</label>
-                        <input 
-                          required
-                          type="text" 
-                          value={description}
-                          onChange={(e) => setDescription(e.target.value)}
-                          placeholder="Ex: Aluguel, Salário, Jantar..."
-                          className="w-full bg-[#F9F9F9] border-none rounded-3xl px-8 py-5 focus:ring-4 focus:ring-black/5 outline-none transition-all placeholder:text-gray-300 font-black text-lg"
-                        />
+                <AnimatePresence mode="wait">
+                  {!isConfirmingAdd ? (
+                    <motion.div 
+                      key="form-step"
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 20 }}
+                      className="p-10"
+                    >
+                      <div className="flex items-center justify-between mb-10">
+                        <h2 className="text-3xl font-black text-black tracking-tighter uppercase leading-none">Novo Registro</h2>
+                        <button onClick={() => setIsModalOpen(false)} className="p-3 hover:bg-black/5 rounded-full transition-colors cursor-pointer text-black">
+                          <X size={28} />
+                        </button>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                          <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-3 ml-1">Valor</label>
-                          <div className="relative">
-                            <span className="absolute left-8 top-1/2 -translate-y-1/2 text-gray-400 font-black text-lg">R$</span>
+                      <form onSubmit={handleAddTransactionSubmit} className="space-y-8">
+                        {/* Type Selector */}
+                        <div className="flex bg-gray-100 p-2 rounded-3xl">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setType('EXPENSE');
+                              setCategory(CATEGORIES.EXPENSE[0]);
+                            }}
+                            className={cn(
+                              "flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all cursor-pointer",
+                              type === 'EXPENSE' ? "bg-black text-white shadow-lg" : "text-gray-400"
+                            )}
+                          >
+                            Saída
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setType('INCOME');
+                              setCategory(CATEGORIES.INCOME[0]);
+                            }}
+                            className={cn(
+                              "flex-1 py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all cursor-pointer",
+                              type === 'INCOME' ? "bg-black text-white shadow-lg" : "text-gray-400"
+                            )}
+                          >
+                            Entrada
+                          </button>
+                        </div>
+
+                        <div className="space-y-6">
+                          <div>
+                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-3 ml-1">Descrição</label>
                             <input 
                               required
-                              type="number" 
-                              step="0.01"
-                              value={amount}
-                              onChange={(e) => setAmount(e.target.value)}
-                              placeholder="0,00"
-                              className="w-full bg-[#F9F9F9] border-none rounded-3xl pl-16 pr-8 py-5 focus:ring-4 focus:ring-black/5 outline-none transition-all font-black text-2xl tracking-tighter"
+                              type="text" 
+                              value={description}
+                              onChange={(e) => setDescription(e.target.value)}
+                              placeholder="Ex: Aluguel, Salário, Jantar..."
+                              className="w-full bg-[#F9F9F9] border-none rounded-3xl px-8 py-5 focus:ring-4 focus:ring-black/5 outline-none transition-all placeholder:text-gray-300 font-extrabold text-lg"
                             />
                           </div>
-                        </div>
-                        <div>
-                          <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-3 ml-1">Categoria</label>
-                          <div className="relative">
-                            <select 
-                              value={category}
-                              onChange={(e) => setCategory(e.target.value)}
-                              className="w-full bg-[#F9F9F9] border-none rounded-3xl px-8 py-5 focus:ring-4 focus:ring-black/5 outline-none transition-all font-black text-gray-700 appearance-none cursor-pointer"
-                            >
-                              {(type === 'INCOME' ? CATEGORIES.INCOME : CATEGORIES.EXPENSE).map(cat => (
-                                <option key={cat} value={cat}>{cat}</option>
-                              ))}
-                            </select>
-                            <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none opacity-20">
-                              <TrendingDown size={16} className={type === 'INCOME' ? 'rotate-180 text-emerald-600' : 'text-rose-600'} />
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-3 ml-1">Valor</label>
+                              <div className="relative">
+                                <span className="absolute left-8 top-1/2 -translate-y-1/2 text-gray-400 font-black text-lg font-sans">R$</span>
+                                <input 
+                                  required
+                                  type="number" 
+                                  step="0.01"
+                                  value={amount}
+                                  onChange={(e) => setAmount(e.target.value)}
+                                  placeholder="0,00"
+                                  className="w-full bg-[#F9F9F9] border-none rounded-3xl pl-16 pr-8 py-5 focus:ring-4 focus:ring-black/5 outline-none transition-all font-black text-2xl tracking-tighter"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-3 ml-1">Categoria</label>
+                              <div className="relative">
+                                <select 
+                                  value={category}
+                                  onChange={(e) => setCategory(e.target.value)}
+                                  className="w-full bg-[#F9F9F9] border-none rounded-3xl px-8 py-5 focus:ring-4 focus:ring-black/5 outline-none transition-all font-black text-gray-700 appearance-none cursor-pointer"
+                                >
+                                  {(type === 'INCOME' ? CATEGORIES.INCOME : CATEGORIES.EXPENSE).map(cat => (
+                                    <option key={cat} value={cat}>{cat}</option>
+                                  ))}
+                                </select>
+                                <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none opacity-20">
+                                  <TrendingDown size={16} className={type === 'INCOME' ? 'rotate-180 text-emerald-600' : 'text-rose-600'} />
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    </div>
 
-                    <button 
-                      type="submit"
-                      className={cn(
-                        "w-full py-6 rounded-3xl text-white font-black uppercase tracking-[0.2em] text-sm shadow-2xl transition-all active:scale-[0.98] cursor-pointer mt-4",
-                        type === 'INCOME' ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-100/50" : "bg-rose-600 hover:bg-rose-700 shadow-rose-100/50"
-                      )}
+                        <button 
+                          type="submit"
+                          className={cn(
+                            "w-full py-6 rounded-3xl text-white font-black uppercase tracking-[0.2em] text-sm shadow-2xl transition-all active:scale-[0.98] cursor-pointer mt-4 hover:opacity-90",
+                            type === 'INCOME' ? "bg-emerald-600 shadow-emerald-100/50" : "bg-rose-600 shadow-rose-100/50"
+                          )}
+                        >
+                          Confirmar Operação
+                        </button>
+                      </form>
+                    </motion.div>
+                  ) : (
+                    /* Confirm action guard/warning requested by user */
+                    <motion.div 
+                      key="confirm-step"
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -20 }}
+                      className="p-10 text-center space-y-8"
                     >
-                      Confirmar Operação
-                    </button>
-                  </form>
+                      <div className="w-16 h-16 bg-amber-50 border border-amber-200 text-amber-600 rounded-full flex items-center justify-center mx-auto shadow-sm">
+                        <AlertCircle size={32} />
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <h3 className="text-2xl font-black uppercase tracking-tight text-black">Verifique os Dados</h3>
+                        <p className="text-xs text-gray-400 font-extrabold uppercase tracking-widest leading-relaxed">
+                          Deseja realmente confirmar esta operação ou prefere revisar antes?
+                        </p>
+                      </div>
+
+                      {/* Transaction details card preview */}
+                      <div className="bg-gray-50 border border-black/5 p-6 rounded-3xl text-left space-y-4">
+                        <div className="flex justify-between items-center border-b border-black/5 pb-3">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Tipo de Registro</span>
+                          <span className={cn(
+                            "text-xs font-black uppercase tracking-widest px-3 py-1 rounded-full",
+                            type === 'INCOME' ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                          )}>
+                            {type === 'INCOME' ? 'Entrada (Receita)' : 'Saída (Despesa)'}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center border-b border-black/5 pb-3">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Descrição</span>
+                          <span className="text-sm font-black text-black">{description}</span>
+                        </div>
+                        <div className="flex justify-between items-center border-b border-black/5 pb-3">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Categoria</span>
+                          <span className="text-sm font-black text-black">{category}</span>
+                        </div>
+                        <div className="flex justify-between items-baseline pt-1">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Valor Total</span>
+                          <span className={cn(
+                            "text-3xl font-black tracking-tighter",
+                            type === 'INCOME' ? "text-emerald-600" : "text-rose-600"
+                          )}>
+                            {formatCurrency(parseFloat(amount))}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-3">
+                        <button 
+                          onClick={handleAddTransactionConfirm}
+                          className={cn(
+                            "w-full py-5 rounded-3xl text-white font-black uppercase tracking-[0.2em] text-[11px] shadow-xl transition-all active:scale-[0.98] cursor-pointer hover:brightness-115",
+                            type === 'INCOME' ? "bg-emerald-600" : "bg-rose-600"
+                          )}
+                        >
+                          Sim, Confirmar e Salvar
+                        </button>
+                        <button 
+                          onClick={() => setIsConfirmingAdd(false)}
+                          className="w-full py-5 rounded-3xl border border-black/10 text-gray-500 hover:text-black hover:border-black font-black uppercase tracking-[0.2em] text-[11px] transition-all cursor-pointer"
+                        >
+                          Não, Verificar Antes
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            </div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Double Guard Delete Confirmation Overlay Modal */}
+      <AnimatePresence>
+        {transactionToDelete && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setTransactionToDelete(null)}
+              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 p-4"
+            />
+            <div className="fixed inset-0 z-[60] flex items-center justify-center pointer-events-none p-4">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9, y: 30 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 30 }}
+                className="w-full max-w-md bg-white rounded-[40px] shadow-2xl pointer-events-auto p-10 border border-black/5 text-center space-y-8"
+              >
+                <div className="w-16 h-16 bg-rose-50 border border-rose-100 text-rose-600 rounded-full flex items-center justify-center mx-auto">
+                  <Trash2 size={28} />
+                </div>
+
+                <div className="space-y-2">
+                  <h3 className="text-2xl font-black uppercase tracking-tight text-black">Excluir Registro?</h3>
+                  <p className="text-xs text-gray-400 font-extrabold uppercase tracking-widest leading-relaxed">
+                    Você tem certeza de que deseja apagar permanentemente esta transação por digitação incorreta?
+                  </p>
+                </div>
+
+                {/* Micro preview */}
+                <div className="p-5 bg-rose-50/50 rounded-2xl border border-rose-100/50 text-left flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-black uppercase text-rose-800 tracking-wider font-sans">{transactionToDelete.description}</p>
+                    <p className="text-[9px] font-mono text-gray-400">{transactionToDelete.category}</p>
+                  </div>
+                  <span className="text-lg font-black text-rose-700 tracking-tight">
+                    {formatCurrency(transactionToDelete.amount)}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <button 
+                    onClick={() => deleteTransaction(transactionToDelete.id)}
+                    className="py-4.5 rounded-3xl bg-rose-600 text-white font-black uppercase tracking-[0.15em] text-[10px] shadow-xl hover:bg-rose-700 active:scale-[0.98] transition-all cursor-pointer"
+                  >
+                    Sim, Excluir
+                  </button>
+                  <button 
+                    onClick={() => setTransactionToDelete(null)}
+                    className="py-4.5 rounded-3xl border border-black/10 text-gray-400 hover:text-black font-black uppercase tracking-[0.15em] text-[10px] transition-all cursor-pointer hover:border-black"
+                  >
+                    Cancelar
+                  </button>
                 </div>
               </motion.div>
             </div>
