@@ -59,6 +59,16 @@ export default function App() {
   const [amount, setAmount] = useState('');
   const [type, setType] = useState<TransactionType>('EXPENSE');
   const [category, setCategory] = useState(CATEGORIES.EXPENSE[0]);
+  const [transactionDate, setTransactionDate] = useState('');
+  const [dateValidationError, setDateValidationError] = useState<string | null>(null);
+
+  const getInitialTransactionDate = (selDate: Date) => {
+    const today = new Date();
+    if (today.getMonth() === selDate.getMonth() && today.getFullYear() === selDate.getFullYear()) {
+      return format(today, 'yyyy-MM-dd');
+    }
+    return format(startOfMonth(selDate), 'yyyy-MM-dd');
+  };
 
   // Auth States
   const [user, setUser] = useState<any>(null);
@@ -360,11 +370,7 @@ export default function App() {
   }, [transactions, selectedDate]);
 
   const handlePrevMonth = () => {
-    setSelectedDate(prev => {
-      const next = subMonths(prev, 1);
-      if (next < startOfMonth(APP_START_DATE)) return prev;
-      return next;
-    });
+    setSelectedDate(prev => subMonths(prev, 1));
   };
   
   const handleNextMonth = () => setSelectedDate(prev => addMonths(prev, 1));
@@ -374,6 +380,23 @@ export default function App() {
     e.preventDefault();
     const numAmount = parseFloat(amount);
     if (!description || isNaN(numAmount) || numAmount <= 0) return;
+
+    // Validate if entered transactionDate is within selectedDate month
+    try {
+      const enteredDate = parseISO(transactionDate);
+      const start = startOfMonth(selectedDate);
+      const end = endOfMonth(selectedDate);
+      
+      if (!isWithinInterval(enteredDate, { start, end })) {
+        setDateValidationError(`O dia selecionado precisa ser dentro de ${format(selectedDate, 'MMMM / yyyy', { locale: ptBR })}`);
+        return;
+      }
+    } catch (err) {
+      setDateValidationError('Data de operação inválida.');
+      return;
+    }
+
+    setDateValidationError(null);
     setIsConfirmingAdd(true); // Open recap guard validation
   };
 
@@ -386,7 +409,7 @@ export default function App() {
       amount: numAmount,
       type,
       category,
-      date: new Date().toISOString()
+      date: new Date(transactionDate + 'T12:00:00').toISOString()
     };
 
     // Optimistically update
@@ -681,15 +704,16 @@ export default function App() {
               <div className="flex items-center gap-2 md:gap-4">
                 <button 
                   onClick={handlePrevMonth}
-                  disabled={startOfMonth(selectedDate) <= startOfMonth(APP_START_DATE)}
-                  className="p-2 hover:bg-black/5 rounded-full transition-colors cursor-pointer shrink-0 disabled:opacity-20 disabled:cursor-not-allowed"
+                  className="p-2 hover:bg-black/5 rounded-full transition-colors cursor-pointer shrink-0"
                 >
                   <ChevronLeft size={24} />
                 </button>
-                <div className="space-y-1 min-w-0">
+                <div className="space-y-2 min-w-0">
                   <p className="text-[10px] uppercase tracking-[0.3em] font-black text-gray-400">Visualizando o período</p>
-                  <h1 className="text-4xl md:text-5xl lg:text-6xl font-black tracking-tighter uppercase leading-none break-words">
-                    {format(selectedDate, 'MMMM.yyyy', { locale: ptBR })}
+                  <h1 className="text-4xl md:text-5xl lg:text-6xl font-black tracking-tight uppercase leading-none break-words flex flex-wrap items-center gap-x-4 gap-y-1">
+                    <span className="text-black">{format(selectedDate, 'MMMM', { locale: ptBR })}</span>
+                    <span className="text-gray-300 font-light text-2xl md:text-3xl lg:text-4xl select-none">|</span>
+                    <span className="text-black tracking-wide">{format(selectedDate, 'yyyy')}</span>
                   </h1>
                 </div>
                 <button 
@@ -934,6 +958,8 @@ export default function App() {
         </span>
         <div 
           onClick={() => {
+            setTransactionDate(getInitialTransactionDate(selectedDate));
+            setDateValidationError(null);
             setIsModalOpen(true);
             setIsConfirmingAdd(false);
           }}
@@ -1024,22 +1050,33 @@ export default function App() {
 
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
-                              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-3 ml-1">Valor</label>
+                              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-3 ml-1 font-sans">Dia da Operação</label>
                               <div className="relative">
-                                <span className="absolute left-8 top-1/2 -translate-y-1/2 text-gray-400 font-black text-lg font-sans">R$</span>
+                                <span className="absolute left-8 top-1/2 -translate-y-1/2 text-gray-400"><Calendar size={18} /></span>
                                 <input 
                                   required
-                                  type="number" 
-                                  step="0.01"
-                                  value={amount}
-                                  onChange={(e) => setAmount(e.target.value)}
-                                  placeholder="0,00"
-                                  className="w-full bg-[#F9F9F9] border-none rounded-3xl pl-16 pr-8 py-5 focus:ring-4 focus:ring-black/5 outline-none transition-all font-black text-2xl tracking-tighter"
+                                  type="date" 
+                                  value={transactionDate}
+                                  onChange={(e) => {
+                                    setTransactionDate(e.target.value);
+                                    setDateValidationError(null);
+                                  }}
+                                  className={cn(
+                                    "w-full bg-[#F9F9F9] border rounded-3xl pl-16 pr-8 py-5 focus:ring-4 focus:ring-black/5 outline-none transition-all font-black text-sm text-gray-700 cursor-pointer",
+                                    dateValidationError ? "border-rose-500 focus:ring-rose-500/20 bg-rose-50/10" : "border-transparent"
+                                  )}
                                 />
                               </div>
+                              {dateValidationError && (
+                                <p className="text-[10px] font-black uppercase tracking-wider text-rose-500 mt-2.5 ml-1 flex items-center gap-1 leading-normal">
+                                  <AlertCircle size={10} className="shrink-0" />
+                                  {dateValidationError}
+                                </p>
+                              )}
                             </div>
+
                             <div>
-                              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-3 ml-1">Categoria</label>
+                              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-3 ml-1 font-sans">Categoria</label>
                               <div className="relative">
                                 <select 
                                   value={category}
@@ -1053,6 +1090,22 @@ export default function App() {
                                 <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none opacity-20">
                                   <TrendingDown size={16} className={type === 'INCOME' ? 'rotate-180 text-emerald-600' : 'text-rose-600'} />
                                 </div>
+                              </div>
+                            </div>
+
+                            <div className="md:col-span-2">
+                              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-3 ml-1 font-sans">Valor</label>
+                              <div className="relative">
+                                <span className="absolute left-8 top-1/2 -translate-y-1/2 text-gray-400 font-black text-lg font-sans">R$</span>
+                                <input 
+                                  required
+                                  type="number" 
+                                  step="0.01"
+                                  value={amount}
+                                  onChange={(e) => setAmount(e.target.value)}
+                                  placeholder="0,00"
+                                  className="w-full bg-[#F9F9F9] border-none rounded-3xl pl-16 pr-8 py-5 focus:ring-4 focus:ring-black/5 outline-none transition-all font-black text-2xl tracking-tighter"
+                                />
                               </div>
                             </div>
                           </div>
@@ -1103,6 +1156,18 @@ export default function App() {
                         <div className="flex justify-between items-center border-b border-black/5 pb-3">
                           <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Descrição</span>
                           <span className="text-sm font-black text-black">{description}</span>
+                        </div>
+                        <div className="flex justify-between items-center border-b border-black/5 pb-3">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Data</span>
+                          <span className="text-sm font-black text-black">
+                            {(() => {
+                              try {
+                                return format(parseISO(transactionDate), 'dd/MM/yyyy');
+                              } catch {
+                                return transactionDate;
+                              }
+                            })()}
+                          </span>
                         </div>
                         <div className="flex justify-between items-center border-b border-black/5 pb-3">
                           <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Categoria</span>
