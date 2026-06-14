@@ -1,13 +1,38 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
+    <title>FinPay</title>
+
+    <!-- Meta Tags for PWA & iOS Support -->
+    <meta name="theme-color" content="#000000" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="FinPay" />
+
+    <!-- Favicons and Manifest Linkage -->
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <link rel="manifest" href="/manifest.json" />
   </head>
-  <body>
+  <body class="bg-[#FDFDFD]">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+
+    <!-- Async Service Worker Registration -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then((registration) => {
+              console.log('PWA Service Worker registrado com sucesso:', registration.scope);
+            })
+            .catch((error) => {
+              console.error('Falha ao registrar PWA Service Worker:', error);
+            });
+        });
+      }
+    </script>
   </body>
 </html>
-

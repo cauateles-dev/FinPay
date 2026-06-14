@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1A1A1A" />
+      <stop offset="100%" stop-color="#000000" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FBBF24" />
+      <stop offset="100%" stop-color="#D97706" />
+    </linearGradient>
+  </defs>
+
+  <!-- Complete fill background essential for maskable icons (no rx curve outer to prevent gaps) -->
+  <rect width="512" height="512" fill="url(#bgGrad)" />
+
+  <!-- Logomark scaled down into the PWA icon safe zone (within the inner 60% circle) -->
+  <g transform="translate(130, 140) scale(0.8)">
+    <path d="M 150,20 L 260,20 C 275,20 280,30 280,45 L 280,180 C 280,240 180,270 150,280 C 120,270 20,240 20,180 L 20,45 C 20,30 25,20 40,20 Z" 
+          fill="none" 
+          stroke="url(#goldGrad)" 
+          stroke-width="12" 
+          stroke-linejoin="round" />
+
+    <rect x="70" y="90" width="160" height="100" rx="20" fill="none" stroke="#FFFFFF" stroke-width="14" />
+    <circle cx="200" cy="140" r="14" fill="url(#goldGrad)" />
+    
+    <path d="M 40,160 L 110,110 L 170,135 L 240,70" 
+          fill="none" 
+          stroke="#FFFFFF" 
+          stroke-width="10" 
+          stroke-linecap="round" 
+          stroke-linejoin="round" />
+    <polygon points="240,70 220,70 240,90" fill="#FFFFFF" />
+  </g>
+</svg>
