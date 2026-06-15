@@ -1119,7 +1119,7 @@ export default function App() {
                 initial={{ opacity: 0, scale: 0.9, y: 40 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.9, y: 40 }}
-                className="w-full max-w-lg bg-white rounded-[40px] shadow-2xl pointer-events-auto overflow-hidden border border-black/5"
+                className="w-full max-w-lg bg-white rounded-[32px] md:rounded-[40px] shadow-2xl pointer-events-auto border border-black/5 max-h-[90vh] overflow-y-auto"
               >
                 <AnimatePresence mode="wait">
                   {!isConfirmingAdd ? (
@@ -1128,10 +1128,10 @@ export default function App() {
                       initial={{ opacity: 0, x: -20 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: 20 }}
-                      className="p-10"
+                      className="p-6 md:p-10"
                     >
-                      <div className="flex items-center justify-between mb-10">
-                        <h2 className="text-3xl font-black text-black tracking-tighter uppercase leading-none">Novo Registro</h2>
+                      <div className="flex items-center justify-between mb-6 md:mb-10">
+                        <h2 className="text-2xl md:text-3xl font-black text-black tracking-tighter uppercase leading-none">Novo Registro</h2>
                         <button onClick={() => setIsModalOpen(false)} className="p-3 hover:bg-black/5 rounded-full transition-colors cursor-pointer text-black">
                           <X size={28} />
                         </button>
@@ -1338,7 +1338,7 @@ export default function App() {
                       initial={{ opacity: 0, x: 20 }}
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: -20 }}
-                      className="p-10 text-center space-y-8"
+                      className="p-6 md:p-10 text-center space-y-6 md:space-y-8"
                     >
                       <div className="w-16 h-16 bg-amber-50 border border-amber-200 text-amber-600 rounded-full flex items-center justify-center mx-auto shadow-sm">
                         <AlertCircle size={32} />
@@ -1451,7 +1451,7 @@ export default function App() {
                 initial={{ opacity: 0, scale: 0.9, y: 30 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.9, y: 30 }}
-                className="w-full max-w-md bg-white rounded-[40px] shadow-2xl pointer-events-auto overflow-hidden border border-black/5"
+                className="w-full max-w-md bg-white rounded-[32px] md:rounded-[40px] shadow-2xl pointer-events-auto border border-black/5 max-h-[90vh] overflow-y-auto"
               >
                 {/* Header */}
                 <div className="p-8 pb-4 flex items-center justify-between border-b border-black/5">
