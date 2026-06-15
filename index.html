@@ -23,15 +23,37 @@
     <!-- Async Service Worker Registration -->
     <script>
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then((registration) => {
-              console.log('PWA Service Worker registrado com sucesso:', registration.scope);
-            })
-            .catch((error) => {
-              console.error('Falha ao registrar PWA Service Worker:', error);
+        // Se estivermos em desenvolvimento ou de teste no preview do AI Studio, vamos desregistrar o SW e limpar o cache para atualizar instantaneamente!
+        const isDevelopment = window.location.hostname.includes('localhost') || 
+                              window.location.hostname.includes('run.app') ||
+                              window.location.hostname.includes('gitpod');
+
+        if (isDevelopment) {
+          navigator.serviceWorker.getRegistrations().then((registrations) => {
+            for (let registration of registrations) {
+              registration.unregister();
+              console.log('SW desativado temporariamente em ambiente de desenvolvimento.');
+            }
+          });
+          if ('caches' in window) {
+            caches.keys().then((names) => {
+              for (let name of names) {
+                caches.delete(name);
+              }
+              console.log('Cache limpo para atualização em tempo real.');
             });
-        });
+          }
+        } else {
+          window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/sw.js')
+              .then((registration) => {
+                console.log('PWA Service Worker registrado com sucesso:', registration.scope);
+              })
+              .catch((error) => {
+                console.error('Falha ao registrar PWA Service Worker:', error);
+              });
+          });
+        }
       }
     </script>
   </body>

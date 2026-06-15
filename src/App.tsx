@@ -55,6 +55,8 @@ export default function App() {
   const APP_START_DATE = useMemo(() => new Date(2026, 4, 1), []);
 
   const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState<'ALL' | 'INCOME' | 'EXPENSE'>('ALL');
+  const [selectedTransactionDetail, setSelectedTransactionDetail] = useState<Transaction | null>(null);
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [type, setType] = useState<TransactionType>('EXPENSE');
@@ -305,14 +307,15 @@ export default function App() {
 
     return transactions.filter(t => {
       const isMatch = t.description.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesFilter = filterType === 'ALL' || t.type === filterType;
       try {
         const inMonth = isWithinInterval(parseISO(t.date), { start, end });
-        return isMatch && inMonth;
+        return isMatch && inMonth && matchesFilter;
       } catch {
         return false;
       }
     });
-  }, [transactions, searchTerm, selectedDate]);
+  }, [transactions, searchTerm, selectedDate, filterType]);
 
   const stats = useMemo(() => {
     const totalIncome = transactions
@@ -789,13 +792,50 @@ export default function App() {
       <main className="max-w-6xl mx-auto px-6 grid grid-cols-1 lg:grid-cols-12 gap-10">
         {/* Left Column: Transactions */}
         <section className="lg:col-span-7 space-y-8">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <h2 className="text-2xl font-black uppercase tracking-tight flex items-center gap-3">
               Fluxo Mensal
             </h2>
-            <span className="text-[10px] font-black text-white bg-black px-3 py-1 rounded-full uppercase tracking-widest leading-none">
+            <span className="text-[10px] font-black text-white bg-black px-3.5 py-1.5 rounded-full uppercase tracking-widest leading-none self-start sm:self-auto shadow-sm">
               {filteredTransactions.length} registros
             </span>
+          </div>
+
+          {/* Quick Filters Pill Row */}
+          <div className="flex flex-wrap gap-2 p-1.5 bg-gray-50 border border-black/5 rounded-2xl">
+            <button
+              onClick={() => setFilterType('ALL')}
+              className={cn(
+                "flex-1 sm:flex-none px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer text-center",
+                filterType === 'ALL'
+                  ? "bg-black text-white shadow-md animate-duration-100"
+                  : "text-gray-400 hover:text-black hover:bg-gray-100"
+              )}
+            >
+              Todos
+            </button>
+            <button
+              onClick={() => setFilterType('INCOME')}
+              className={cn(
+                "flex-1 sm:flex-none px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer text-center",
+                filterType === 'INCOME'
+                  ? "bg-emerald-600 text-white shadow-md shadow-emerald-500/10"
+                  : "text-gray-400 hover:text-emerald-600 hover:bg-emerald-50"
+              )}
+            >
+              Entradas
+            </button>
+            <button
+              onClick={() => setFilterType('EXPENSE')}
+              className={cn(
+                "flex-1 sm:flex-none px-5 py-3 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer text-center",
+                filterType === 'EXPENSE'
+                  ? "bg-rose-600 text-white shadow-md shadow-rose-500/10"
+                  : "text-gray-400 hover:text-rose-600 hover:bg-rose-50"
+              )}
+            >
+              Saídas
+            </button>
           </div>
 
           {/* Search Bar */}
@@ -830,7 +870,8 @@ export default function App() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.98 }}
-                    className="bg-white p-6 rounded-2xl shadow-[0_4px_20px_-12px_rgba(0,0,0,0.1)] border border-black/5 flex items-center justify-between group hover:border-black/20 transition-all hover:translate-x-1"
+                    onClick={() => setSelectedTransactionDetail(t)}
+                    className="bg-white p-6 rounded-2xl shadow-[0_4px_20px_-12px_rgba(0,0,0,0.1)] border border-black/5 flex items-center justify-between group hover:border-black/20 transition-all hover:translate-x-1 cursor-pointer select-none active:bg-gray-50"
                   >
                     <div className="flex items-center gap-5 min-w-0">
                       <div className={cn(
@@ -840,9 +881,11 @@ export default function App() {
                         {t.type === 'INCOME' ? '+' : '-'}
                       </div>
                       <div className="min-w-0">
-                        <h4 className="font-black text-xl tracking-tight truncate">{t.description}</h4>
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                          {t.category} • {formatDate(t.date)}
+                        <h4 className="font-black text-xl tracking-tight truncate group-hover:text-black/80 transition-colors">{t.description}</h4>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5 mt-0.5">
+                          <span>{t.category}</span>
+                          <span className="text-gray-300">•</span>
+                          <span>{formatDate(t.date)}</span>
                         </p>
                       </div>
                     </div>
@@ -855,12 +898,20 @@ export default function App() {
                       </span>
                       {/* Trash Bin Icon always visible for clear accessibility */}
                       <button 
-                        onClick={() => setTransactionToDelete(t)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setTransactionToDelete(t);
+                        }}
                         className="text-rose-400 hover:text-rose-600 active:scale-90 p-2.5 transition-all rounded-full hover:bg-rose-50 cursor-pointer duration-200"
                         title="Deletar este registro"
                       >
                         <Trash2 size={18} />
                       </button>
+
+                      {/* Interactive Chevron indicating clickability */}
+                      <div className="text-gray-300 group-hover:text-black group-hover:translate-x-1.5 transition-all duration-200 shrink-0 hidden sm:block">
+                        <ChevronRight size={20} />
+                      </div>
                     </div>
                   </motion.div>
                 ))}
@@ -1204,6 +1255,112 @@ export default function App() {
                     </motion.div>
                   )}
                 </AnimatePresence>
+              </motion.div>
+            </div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Transaction Details Modal */}
+      <AnimatePresence>
+        {selectedTransactionDetail && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setSelectedTransactionDetail(null)}
+              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 p-4"
+            />
+            <div className="fixed inset-0 z-[60] flex items-center justify-center pointer-events-none p-4">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9, y: 30 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.9, y: 30 }}
+                className="w-full max-w-md bg-white rounded-[40px] shadow-2xl pointer-events-auto overflow-hidden border border-black/5"
+              >
+                {/* Header */}
+                <div className="p-8 pb-4 flex items-center justify-between border-b border-black/5">
+                  <h3 className="text-xl font-black uppercase tracking-tight text-black">
+                    Detalhes do Registro
+                  </h3>
+                  <button 
+                    onClick={() => setSelectedTransactionDetail(null)}
+                    className="p-3 hover:bg-black/5 rounded-full transition-colors text-black cursor-pointer"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {/* Body Content */}
+                <div className="p-8 space-y-6">
+                  {/* Category Circle and Big Value */}
+                  <div className="flex flex-col items-center justify-center text-center space-y-3 py-2">
+                    <div className={cn(
+                      "w-16 h-16 rounded-full flex items-center justify-center font-black text-2xl shadow-inner",
+                      selectedTransactionDetail.type === 'INCOME' ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"
+                    )}>
+                      {selectedTransactionDetail.type === 'INCOME' ? '+' : '-'}
+                    </div>
+                    <div className="space-y-1">
+                      <p className={cn(
+                        "text-3xl md:text-3xl font-black tracking-tight",
+                        selectedTransactionDetail.type === 'INCOME' ? "text-emerald-600" : "text-rose-600"
+                      )}>
+                        {selectedTransactionDetail.type === 'INCOME' ? '+' : '-'} {formatCurrency(selectedTransactionDetail.amount)}
+                      </p>
+                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest bg-gray-50 px-3 py-1 rounded-full inline-block border border-black/5">
+                        {selectedTransactionDetail.category}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Info table */}
+                  <div className="bg-gray-50 border border-black/5 rounded-3xl p-6 space-y-4">
+                    <div className="flex justify-between items-baseline border-b border-black/5 pb-3">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Descrição</span>
+                      <span className="text-sm font-black text-black text-right max-w-[200px] break-words">{selectedTransactionDetail.description}</span>
+                    </div>
+                    <div className="flex justify-between items-center border-b border-black/5 pb-3">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Data de Operação</span>
+                      <span className="text-sm font-black text-black">{formatDate(selectedTransactionDetail.date)}</span>
+                    </div>
+                    <div className="flex justify-between items-center border-b border-black/5 pb-3">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Tipo</span>
+                      <span className={cn(
+                        "text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full",
+                        selectedTransactionDetail.type === 'INCOME' ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                      )}>
+                        {selectedTransactionDetail.type === 'INCOME' ? 'Entrada (Crédito)' : 'Saída (Débito)'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">ID Identificador</span>
+                      <span className="text-[9px] font-mono text-gray-400 uppercase font-bold">{selectedTransactionDetail.id}</span>
+                    </div>
+                  </div>
+
+                  {/* Actions inside modal */}
+                  <div className="grid grid-cols-1 gap-3 pt-2">
+                    <button 
+                      onClick={() => {
+                        const target = selectedTransactionDetail;
+                        setSelectedTransactionDetail(null);
+                        setTransactionToDelete(target);
+                      }}
+                      className="w-full py-4 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-2xl flex items-center justify-center gap-2 text-[10px] uppercase font-black tracking-widest border border-rose-100/50 transition-all cursor-pointer"
+                    >
+                      <Trash2 size={12} />
+                      Excluir esta Transação
+                    </button>
+                    <button 
+                      onClick={() => setSelectedTransactionDetail(null)}
+                      className="w-full py-4.5 bg-black hover:bg-black/90 text-white rounded-2xl text-[10px] uppercase font-black tracking-widest shadow-xl transition-all active:scale-[0.98] cursor-pointer"
+                    >
+                      Fechar Detalhes
+                    </button>
+                  </div>
+                </div>
               </motion.div>
             </div>
           </>

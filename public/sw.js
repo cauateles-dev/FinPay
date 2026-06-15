@@ -37,6 +37,15 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
+  // Evitar cache no ambiente de desenvolvimento ou preview do AI Studio
+  const isDevelopment = url.hostname.includes('localhost') || 
+                        url.hostname.includes('run.app') || 
+                        url.hostname.includes('gitpod');
+
+  if (isDevelopment) {
+    return; // Não intercepta, deixa carregar direto da rede
+  }
+
   // Bypass API calls (like Supabase database queries or authentication) to avoid caching dynamic live database updates
   if (url.pathname.startsWith('/api') || url.hostname.includes('supabase.co')) {
     return;
