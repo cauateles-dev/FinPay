@@ -41,7 +41,7 @@ import { format, startOfMonth, endOfMonth, isWithinInterval, parseISO, addMonths
 import { ptBR } from 'date-fns/locale';
 
 import { Transaction, TransactionType, CATEGORIES, CATEGORY_COLORS } from './types';
-import { cn, formatCurrency, formatDate } from './lib/utils';
+import { cn, formatCurrency, formatDate, parseTransactionMeta, TransactionMetadata } from './lib/utils';
 import { supabase } from './supabase';
 
 export default function App() {
@@ -63,6 +63,8 @@ export default function App() {
   const [category, setCategory] = useState(CATEGORIES.EXPENSE[0]);
   const [transactionDate, setTransactionDate] = useState('');
   const [dateValidationError, setDateValidationError] = useState<string | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<'DEBIT' | 'CREDIT'>('DEBIT');
+  const [installmentsCount, setInstallmentsCount] = useState<number>(1);
 
   const getInitialTransactionDate = (selDate: Date) => {
     const today = new Date();
@@ -405,41 +407,74 @@ export default function App() {
 
   const handleAddTransactionConfirm = async () => {
     const numAmount = parseFloat(amount);
-    const newId = Math.random().toString(36).substr(2, 9);
-    const newTransaction: Transaction = {
-      id: newId,
-      description,
-      amount: numAmount,
-      type,
-      category,
-      date: new Date(transactionDate + 'T12:00:00').toISOString()
-    };
+    const generatedTransactions: Transaction[] = [];
+    const baseDate = parseISO(transactionDate);
+
+    if (type === 'EXPENSE' && paymentMethod === 'CREDIT' && installmentsCount > 1) {
+      const installmentValue = Number((numAmount / installmentsCount).toFixed(2));
+      for (let i = 1; i <= installmentsCount; i++) {
+        const tId = Math.random().toString(36).substr(2, 9);
+        const installmentDate = addMonths(baseDate, i - 1);
+        const dateISO = new Date(format(installmentDate, 'yyyy-MM-dd') + 'T12:00:00').toISOString();
+        const suffixedDescription = `${description} [P:${i}/${installmentsCount}:${transactionDate}]`;
+        
+        generatedTransactions.push({
+          id: tId,
+          description: suffixedDescription,
+          amount: installmentValue,
+          type: 'EXPENSE',
+          category,
+          date: dateISO
+        });
+      }
+    } else {
+      const newId = Math.random().toString(36).substr(2, 9);
+      let suffixedDescription = description;
+      if (type === 'EXPENSE') {
+        suffixedDescription = `${description} [M:${paymentMethod}]`;
+      }
+      
+      generatedTransactions.push({
+        id: newId,
+        description: suffixedDescription,
+        amount: numAmount,
+        type,
+        category,
+        date: new Date(transactionDate + 'T12:00:00').toISOString()
+      });
+    }
 
     // Optimistically update
-    setTransactions(prev => [newTransaction, ...prev]);
+    setTransactions(prev => [...generatedTransactions, ...prev]);
     setDescription('');
     setAmount('');
+    setPaymentMethod('DEBIT');
+    setInstallmentsCount(1);
     setIsConfirmingAdd(false);
     setIsModalOpen(false);
 
     if (user && !isDemoMode) {
       try {
+        const insertPayloads = generatedTransactions.map(t => ({
+          id: t.id,
+          description: t.description,
+          amount: t.amount,
+          type: t.type,
+          category: t.category,
+          date: t.date,
+          user_id: user.id
+        }));
+
         const { error: insertError } = await supabase
           .from('transactions')
-          .insert({
-            id: newTransaction.id,
-            description: newTransaction.description,
-            amount: newTransaction.amount,
-            type: newTransaction.type,
-            category: newTransaction.category,
-            date: newTransaction.date,
-            user_id: user.id
-          });
+          .insert(insertPayloads);
+
         if (insertError) throw insertError;
       } catch (err) {
         console.error('Erro ao adicionar transação:', err);
         setError('Erro ao salvar no banco. Revertendo alteração local...');
-        setTransactions(prev => prev.filter(t => t.id !== newId));
+        const generatedIds = generatedTransactions.map(t => t.id);
+        setTransactions(prev => prev.filter(t => !generatedIds.includes(t.id)));
       }
     }
   };
@@ -863,33 +898,78 @@ export default function App() {
           <div className="space-y-4">
             {filteredTransactions.length > 0 ? (
               <AnimatePresence mode="popLayout">
-                {filteredTransactions.map((t) => (
-                  <motion.div
-                    key={t.id}
-                    layout
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, scale: 0.98 }}
-                    onClick={() => setSelectedTransactionDetail(t)}
-                    className="bg-white p-6 rounded-2xl shadow-[0_4px_20px_-12px_rgba(0,0,0,0.1)] border border-black/5 flex items-center justify-between group hover:border-black/20 transition-all hover:translate-x-1 cursor-pointer select-none active:bg-gray-50"
-                  >
-                    <div className="flex items-center gap-5 min-w-0">
-                      <div className={cn(
-                        "w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg shrink-0",
-                        t.type === 'INCOME' ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"
-                      )}>
-                        {t.type === 'INCOME' ? '+' : '-'}
+                {filteredTransactions.map((t) => {
+                  const meta = parseTransactionMeta(t.description);
+                  let isPriorInstallment = false;
+                  let formattedOriginalMonth = '';
+                  if (meta.isInstallment && meta.originalDate) {
+                    try {
+                      const origDate = parseISO(meta.originalDate);
+                      const transDate = parseISO(t.date);
+                      if (origDate.getMonth() !== transDate.getMonth() || origDate.getFullYear() !== transDate.getFullYear()) {
+                        isPriorInstallment = true;
+                      }
+                      formattedOriginalMonth = format(origDate, 'MMMM / yyyy', { locale: ptBR });
+                    } catch (e) {}
+                  }
+
+                  return (
+                    <motion.div
+                      key={t.id}
+                      layout
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.98 }}
+                      onClick={() => setSelectedTransactionDetail(t)}
+                      className="bg-white p-6 rounded-2xl shadow-[0_4px_20px_-12px_rgba(0,0,0,0.1)] border border-black/5 flex items-center justify-between group hover:border-black/20 transition-all hover:translate-x-1 cursor-pointer select-none active:bg-gray-50"
+                    >
+                      <div className="flex items-center gap-5 min-w-0">
+                        <div className={cn(
+                          "w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg shrink-0",
+                          t.type === 'INCOME' ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"
+                        )}>
+                          {t.type === 'INCOME' ? '+' : '-'}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="font-black text-xl tracking-tight truncate group-hover:text-black/80 transition-colors">
+                              {meta.cleanDescription}
+                            </h4>
+                            {meta.isInstallment && (
+                              <span className={cn(
+                                "text-[8px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border shrink-0",
+                                isPriorInstallment 
+                                  ? "bg-amber-50 text-amber-700 border-amber-200" 
+                                  : "bg-purple-50 text-purple-700 border-purple-200"
+                              )}>
+                                {isPriorInstallment ? `Parcela ${meta.currentInstallment}/${meta.totalInstallments} (Anterior)` : `Parcela ${meta.currentInstallment}/${meta.totalInstallments}`}
+                              </span>
+                            )}
+                            {!meta.isInstallment && t.type === 'EXPENSE' && meta.paymentMethod === 'CREDIT' && (
+                              <span className="bg-gray-100 text-gray-700 text-[8px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-gray-200 shrink-0">
+                                Crédito
+                              </span>
+                            )}
+                            {!meta.isInstallment && t.type === 'EXPENSE' && meta.paymentMethod === 'DEBIT' && (
+                              <span className="bg-gray-100 text-gray-600 text-[8px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-gray-200 shrink-0">
+                                Débito
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex flex-wrap items-center gap-1.5 mt-1 border-none bg-transparent">
+                            <span>{t.category}</span>
+                            <span className="text-gray-300">•</span>
+                            <span>{formatDate(t.date)}</span>
+                            {isPriorInstallment && (
+                              <>
+                                <span className="text-gray-300">•</span>
+                                <span className="text-amber-600 font-extrabold normal-case">Compra parcelada em {formattedOriginalMonth}</span>
+                              </>
+                            )}
+                          </p>
+                        </div>
                       </div>
-                      <div className="min-w-0">
-                        <h4 className="font-black text-xl tracking-tight truncate group-hover:text-black/80 transition-colors">{t.description}</h4>
-                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5 mt-0.5">
-                          <span>{t.category}</span>
-                          <span className="text-gray-300">•</span>
-                          <span>{formatDate(t.date)}</span>
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4 shrink-0 overflow-visible">
+                      <div className="flex items-center gap-4 shrink-0 overflow-visible">
                       <span className={cn(
                         "text-xl font-black tracking-tight",
                         t.type === 'INCOME' ? "text-emerald-600" : "text-rose-600"
@@ -914,7 +994,7 @@ export default function App() {
                       </div>
                     </div>
                   </motion.div>
-                ))}
+                )})}
               </AnimatePresence>
             ) : (
               <div className="py-20 border-2 border-dashed border-gray-200 rounded-3xl flex flex-col items-center justify-center text-gray-300">
@@ -1011,6 +1091,8 @@ export default function App() {
           onClick={() => {
             setTransactionDate(getInitialTransactionDate(selectedDate));
             setDateValidationError(null);
+            setPaymentMethod('DEBIT');
+            setInstallmentsCount(1);
             setIsModalOpen(true);
             setIsConfirmingAdd(false);
           }}
@@ -1159,6 +1241,82 @@ export default function App() {
                                 />
                               </div>
                             </div>
+
+                            {type === 'EXPENSE' && (
+                              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-50 border border-black/5 p-6 rounded-3xl">
+                                <div>
+                                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-3 ml-1 font-sans">Meio de Pagamento</label>
+                                  <div className="flex bg-white p-1 rounded-2xl border border-black/5">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setPaymentMethod('DEBIT');
+                                        setInstallmentsCount(1);
+                                      }}
+                                      className={cn(
+                                        "flex-1 py-3.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer",
+                                        paymentMethod === 'DEBIT' ? "bg-black text-white shadow-md" : "text-gray-400 hover:text-black"
+                                      )}
+                                    >
+                                      Débito
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setPaymentMethod('CREDIT')}
+                                      className={cn(
+                                        "flex-1 py-3.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer",
+                                        paymentMethod === 'CREDIT' ? "bg-black text-white shadow-md" : "text-gray-400 hover:text-black"
+                                      )}
+                                    >
+                                      Crédito
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {paymentMethod === 'CREDIT' && (
+                                  <div>
+                                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-3 ml-1 font-sans">Parcelamento</label>
+                                    <div className="relative">
+                                      <select
+                                        value={installmentsCount}
+                                        onChange={(e) => setInstallmentsCount(parseInt(e.target.value, 10))}
+                                        className="w-full bg-white border border-black/5 rounded-2xl px-6 py-3.5 focus:ring-4 focus:ring-black/5 outline-none font-black text-gray-700 appearance-none cursor-pointer text-sm"
+                                      >
+                                        <option value="1">À vista (1x)</option>
+                                        <option value="2">2x (Sem juros)</option>
+                                        <option value="3">3x (Sem juros)</option>
+                                        <option value="4">4x (Sem juros)</option>
+                                        <option value="5">5x (Sem juros)</option>
+                                        <option value="6">6x (Sem juros)</option>
+                                        <option value="7">7x (Sem juros)</option>
+                                        <option value="8">8x (Sem juros)</option>
+                                        <option value="9">9x (Sem juros)</option>
+                                        <option value="10">10x (Sem juros)</option>
+                                        <option value="11">11x (Sem juros)</option>
+                                        <option value="12">12x (Sem juros)</option>
+                                      </select>
+                                      <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none opacity-30 text-xs font-black">
+                                        ▼
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                                
+                                {paymentMethod === 'CREDIT' && installmentsCount > 1 && amount && !isNaN(parseFloat(amount)) && (
+                                  <div className="md:col-span-2 bg-amber-50/50 border border-amber-200/50 p-4.5 rounded-2xl">
+                                    <p className="text-[10px] font-black text-amber-700 uppercase tracking-widest leading-relaxed flex items-center gap-2">
+                                      <AlertCircle size={12} className="shrink-0 text-amber-600" strokeWidth={3} />
+                                      <span>
+                                        Sua compra será dividida em <strong>{installmentsCount} parcelas de {formatCurrency(parseFloat(amount) / installmentsCount)}</strong> mensais.
+                                      </span>
+                                    </p>
+                                    <p className="text-[9px] text-gray-400 font-extrabold uppercase mt-1.5 ml-5">
+                                      As parcelas serão lançadas automaticamente do mês selecionado até os meses subsequentes.
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -1224,6 +1382,22 @@ export default function App() {
                           <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Categoria</span>
                           <span className="text-sm font-black text-black">{category}</span>
                         </div>
+                        {type === 'EXPENSE' && (
+                          <div className="flex justify-between items-center border-b border-black/5 pb-3">
+                            <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Meio de Pagamento</span>
+                            <span className="text-xs font-black uppercase tracking-widest bg-gray-100 text-gray-800 px-2.5 py-1 rounded-md">
+                              {paymentMethod === 'DEBIT' ? 'Débito' : installmentsCount > 1 ? `Crédito (${installmentsCount}x)` : 'Crédito à Vista'}
+                            </span>
+                          </div>
+                        )}
+                        {type === 'EXPENSE' && paymentMethod === 'CREDIT' && installmentsCount > 1 && (
+                          <div className="flex justify-between items-center border-b border-black/5 pb-3 bg-amber-50/30 -mx-6 px-6 py-2">
+                            <span className="text-[10px] font-black uppercase tracking-widest text-amber-700">Valor da Parcela (Mensal)</span>
+                            <span className="text-sm font-black text-amber-700">
+                              {formatCurrency(parseFloat(amount) / installmentsCount)}
+                            </span>
+                          </div>
+                        )}
                         <div className="flex justify-between items-baseline pt-1">
                           <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Valor Total</span>
                           <span className={cn(
@@ -1294,51 +1468,97 @@ export default function App() {
 
                 {/* Body Content */}
                 <div className="p-8 space-y-6">
-                  {/* Category Circle and Big Value */}
-                  <div className="flex flex-col items-center justify-center text-center space-y-3 py-2">
-                    <div className={cn(
-                      "w-16 h-16 rounded-full flex items-center justify-center font-black text-2xl shadow-inner",
-                      selectedTransactionDetail.type === 'INCOME' ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"
-                    )}>
-                      {selectedTransactionDetail.type === 'INCOME' ? '+' : '-'}
-                    </div>
-                    <div className="space-y-1">
-                      <p className={cn(
-                        "text-3xl md:text-3xl font-black tracking-tight",
-                        selectedTransactionDetail.type === 'INCOME' ? "text-emerald-600" : "text-rose-600"
-                      )}>
-                        {selectedTransactionDetail.type === 'INCOME' ? '+' : '-'} {formatCurrency(selectedTransactionDetail.amount)}
-                      </p>
-                      <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest bg-gray-50 px-3 py-1 rounded-full inline-block border border-black/5">
-                        {selectedTransactionDetail.category}
-                      </p>
-                    </div>
-                  </div>
+                  {(() => {
+                    const detailMeta = parseTransactionMeta(selectedTransactionDetail.description);
+                    let isPriorInstallment = false;
+                    let origFormatted = '';
+                    if (detailMeta.isInstallment && detailMeta.originalDate) {
+                      try {
+                        const origDate = parseISO(detailMeta.originalDate);
+                        const transDate = parseISO(selectedTransactionDetail.date);
+                        if (origDate.getMonth() !== transDate.getMonth() || origDate.getFullYear() !== transDate.getFullYear()) {
+                          isPriorInstallment = true;
+                        }
+                        origFormatted = format(origDate, 'MMMM / yyyy', { locale: ptBR });
+                      } catch (e) {}
+                    }
 
-                  {/* Info table */}
-                  <div className="bg-gray-50 border border-black/5 rounded-3xl p-6 space-y-4">
-                    <div className="flex justify-between items-baseline border-b border-black/5 pb-3">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Descrição</span>
-                      <span className="text-sm font-black text-black text-right max-w-[200px] break-words">{selectedTransactionDetail.description}</span>
-                    </div>
-                    <div className="flex justify-between items-center border-b border-black/5 pb-3">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Data de Operação</span>
-                      <span className="text-sm font-black text-black">{formatDate(selectedTransactionDetail.date)}</span>
-                    </div>
-                    <div className="flex justify-between items-center border-b border-black/5 pb-3">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Tipo</span>
-                      <span className={cn(
-                        "text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full",
-                        selectedTransactionDetail.type === 'INCOME' ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
-                      )}>
-                        {selectedTransactionDetail.type === 'INCOME' ? 'Entrada (Crédito)' : 'Saída (Débito)'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">ID Identificador</span>
-                      <span className="text-[9px] font-mono text-gray-400 uppercase font-bold">{selectedTransactionDetail.id}</span>
-                    </div>
-                  </div>
+                    return (
+                      <>
+                        {/* Category Circle and Big Value */}
+                        <div className="flex flex-col items-center justify-center text-center space-y-3 py-2">
+                          <div className={cn(
+                            "w-16 h-16 rounded-full flex items-center justify-center font-black text-2xl shadow-inner",
+                            selectedTransactionDetail.type === 'INCOME' ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"
+                          )}>
+                            {selectedTransactionDetail.type === 'INCOME' ? '+' : '-'}
+                          </div>
+                          <div className="space-y-1">
+                            <p className={cn(
+                              "text-3xl md:text-3xl font-black tracking-tight",
+                              selectedTransactionDetail.type === 'INCOME' ? "text-emerald-600" : "text-rose-600"
+                            )}>
+                              {selectedTransactionDetail.type === 'INCOME' ? '+' : '-'} {formatCurrency(selectedTransactionDetail.amount)}
+                            </p>
+                            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest bg-gray-50 px-3 py-1 rounded-full inline-block border border-black/5">
+                              {selectedTransactionDetail.category}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Banner for prior installment purchase */}
+                        {isPriorInstallment && (
+                          <div className="bg-amber-50 border border-amber-200/50 p-5 rounded-3xl text-center space-y-1 my-2">
+                            <p className="text-[10px] font-black uppercase text-amber-800 tracking-widest leading-relaxed flex items-center justify-center gap-1.5">
+                              <AlertCircle size={13} strokeWidth={3} className="shrink-0" />
+                              Compra Parcelada Anterior
+                            </p>
+                            <p className="text-xs text-amber-700 leading-normal font-medium">
+                              Esta transação representa a parcela <strong>{detailMeta.currentInstallment}/{detailMeta.totalInstallments}</strong> de uma compra realizada em <strong>{origFormatted}</strong> (não foi feita neste mês).
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Info table */}
+                        <div className="bg-gray-50 border border-black/5 rounded-3xl p-6 space-y-4">
+                          <div className="flex justify-between items-baseline border-b border-black/5 pb-3">
+                            <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Descrição</span>
+                            <span className="text-sm font-black text-black text-right max-w-[200px] break-words">{detailMeta.cleanDescription}</span>
+                          </div>
+                          <div className="flex justify-between items-center border-b border-black/5 pb-3">
+                            <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Data de Lançamento</span>
+                            <span className="text-sm font-black text-black">{formatDate(selectedTransactionDetail.date)}</span>
+                          </div>
+                          <div className="flex justify-between items-center border-b border-black/5 pb-3">
+                            <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Tipo de Lançamento</span>
+                            <span className={cn(
+                              "text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full",
+                              selectedTransactionDetail.type === 'INCOME' ? "bg-emerald-100 text-emerald-800" : "bg-rose-100 text-rose-800"
+                            )}>
+                              {selectedTransactionDetail.type === 'INCOME' ? 'Entrada (Crédito)' : 'Saída (Débito)'}
+                            </span>
+                          </div>
+                          {selectedTransactionDetail.type === 'EXPENSE' && (
+                            <div className="flex justify-between items-center border-b border-black/5 pb-3">
+                              <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Meio de Pagamento</span>
+                              <span className="text-sm font-black text-black">
+                                {detailMeta.isInstallment 
+                                  ? `Crédito (${detailMeta.currentInstallment}x de ${detailMeta.totalInstallments})` 
+                                  : detailMeta.paymentMethod === 'CREDIT' 
+                                    ? 'Crédito à Vista' 
+                                    : 'Débito'
+                                }
+                              </span>
+                            </div>
+                          )}
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">ID Identificador</span>
+                            <span className="text-[9px] font-mono text-gray-400 uppercase font-bold">{selectedTransactionDetail.id}</span>
+                          </div>
+                        </div>
+                      </>
+                    );
+                  })()}
 
                   {/* Actions inside modal */}
                   <div className="grid grid-cols-1 gap-3 pt-2">
