@@ -26,7 +26,8 @@ import {
   LogOut,
   Key,
   Shield,
-  HelpCircle
+  HelpCircle,
+  Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -324,7 +325,11 @@ export default function App() {
       .filter(t => t.type === 'INCOME')
       .reduce((acc, t) => acc + t.amount, 0);
     const totalExpense = transactions
-      .filter(t => t.type === 'EXPENSE')
+      .filter(t => {
+        if (t.type !== 'EXPENSE') return false;
+        const meta = parseTransactionMeta(t.description);
+        return !(meta.isInstallment && meta.totalInstallments >= 2);
+      })
       .reduce((acc, t) => acc + t.amount, 0);
 
     const start = startOfMonth(selectedDate);
@@ -334,7 +339,12 @@ export default function App() {
       .filter(t => t.type === 'INCOME' && isWithinInterval(parseISO(t.date), { start, end }))
       .reduce((acc, t) => acc + t.amount, 0);
     const monthlyExpense = transactions
-      .filter(t => t.type === 'EXPENSE' && isWithinInterval(parseISO(t.date), { start, end }))
+      .filter(t => {
+        if (t.type !== 'EXPENSE') return false;
+        if (!isWithinInterval(parseISO(t.date), { start, end })) return false;
+        const meta = parseTransactionMeta(t.description);
+        return !(meta.isInstallment && meta.totalInstallments >= 2);
+      })
       .reduce((acc, t) => acc + t.amount, 0);
 
     return {
@@ -359,6 +369,10 @@ export default function App() {
     const categoryTotals: Record<string, number> = {};
     monthTransactions.forEach(t => {
       if (t.type === 'EXPENSE') {
+        const meta = parseTransactionMeta(t.description);
+        if (meta.isInstallment && meta.totalInstallments >= 2) {
+          return;
+        }
         categoryTotals[t.category] = (categoryTotals[t.category] || 0) + t.amount;
       }
     });
@@ -408,48 +422,22 @@ export default function App() {
   const handleAddTransactionConfirm = async () => {
     const numAmount = parseFloat(amount);
     const generatedTransactions: Transaction[] = [];
-    const baseDate = parseISO(transactionDate);
 
-    if (type === 'EXPENSE' && paymentMethod === 'CREDIT' && installmentsCount > 1) {
-      const installmentValue = Number((numAmount / installmentsCount).toFixed(2));
-      for (let i = 1; i <= installmentsCount; i++) {
-        const tId = Math.random().toString(36).substr(2, 9);
-        const installmentDate = addMonths(baseDate, i - 1);
-        const dateISO = new Date(format(installmentDate, 'yyyy-MM-dd') + 'T12:00:00').toISOString();
-        const suffixedDescription = `${description} [P:${i}/${installmentsCount}:${transactionDate}]`;
-        
-        generatedTransactions.push({
-          id: tId,
-          description: suffixedDescription,
-          amount: installmentValue,
-          type: 'EXPENSE',
-          category,
-          date: dateISO
-        });
-      }
-    } else {
-      const newId = Math.random().toString(36).substr(2, 9);
-      let suffixedDescription = description;
-      if (type === 'EXPENSE') {
-        suffixedDescription = `${description} [M:${paymentMethod}]`;
-      }
-      
-      generatedTransactions.push({
-        id: newId,
-        description: suffixedDescription,
-        amount: numAmount,
-        type,
-        category,
-        date: new Date(transactionDate + 'T12:00:00').toISOString()
-      });
-    }
+    const newId = Math.random().toString(36).substr(2, 9);
+    
+    generatedTransactions.push({
+      id: newId,
+      description: description,
+      amount: numAmount,
+      type,
+      category,
+      date: new Date(transactionDate + 'T12:00:00').toISOString()
+    });
 
     // Optimistically update
     setTransactions(prev => [...generatedTransactions, ...prev]);
     setDescription('');
     setAmount('');
-    setPaymentMethod('DEBIT');
-    setInstallmentsCount(1);
     setIsConfirmingAdd(false);
     setIsModalOpen(false);
 
@@ -945,6 +933,11 @@ export default function App() {
                                 {isPriorInstallment ? `Parcela ${meta.currentInstallment}/${meta.totalInstallments} (Anterior)` : `Parcela ${meta.currentInstallment}/${meta.totalInstallments}`}
                               </span>
                             )}
+                            {meta.isInstallment && meta.totalInstallments >= 2 && (
+                              <span className="bg-[#eff6ff] text-[#1d4ed8] border border-[#bfdbfe] text-[8px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0">
+                                Não afeta saldo
+                              </span>
+                            )}
                             {!meta.isInstallment && t.type === 'EXPENSE' && meta.paymentMethod === 'CREDIT' && (
                               <span className="bg-gray-100 text-gray-700 text-[8px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border border-gray-200 shrink-0">
                                 Crédito
@@ -1241,82 +1234,6 @@ export default function App() {
                                 />
                               </div>
                             </div>
-
-                            {type === 'EXPENSE' && (
-                              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6 bg-gray-50 border border-black/5 p-6 rounded-3xl">
-                                <div>
-                                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-3 ml-1 font-sans">Meio de Pagamento</label>
-                                  <div className="flex bg-white p-1 rounded-2xl border border-black/5">
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setPaymentMethod('DEBIT');
-                                        setInstallmentsCount(1);
-                                      }}
-                                      className={cn(
-                                        "flex-1 py-3.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer",
-                                        paymentMethod === 'DEBIT' ? "bg-black text-white shadow-md" : "text-gray-400 hover:text-black"
-                                      )}
-                                    >
-                                      Débito
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setPaymentMethod('CREDIT')}
-                                      className={cn(
-                                        "flex-1 py-3.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer",
-                                        paymentMethod === 'CREDIT' ? "bg-black text-white shadow-md" : "text-gray-400 hover:text-black"
-                                      )}
-                                    >
-                                      Crédito
-                                    </button>
-                                  </div>
-                                </div>
-
-                                {paymentMethod === 'CREDIT' && (
-                                  <div>
-                                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-[0.3em] mb-3 ml-1 font-sans">Parcelamento</label>
-                                    <div className="relative">
-                                      <select
-                                        value={installmentsCount}
-                                        onChange={(e) => setInstallmentsCount(parseInt(e.target.value, 10))}
-                                        className="w-full bg-white border border-black/5 rounded-2xl px-6 py-3.5 focus:ring-4 focus:ring-black/5 outline-none font-black text-gray-700 appearance-none cursor-pointer text-sm"
-                                      >
-                                        <option value="1">À vista (1x)</option>
-                                        <option value="2">2x (Sem juros)</option>
-                                        <option value="3">3x (Sem juros)</option>
-                                        <option value="4">4x (Sem juros)</option>
-                                        <option value="5">5x (Sem juros)</option>
-                                        <option value="6">6x (Sem juros)</option>
-                                        <option value="7">7x (Sem juros)</option>
-                                        <option value="8">8x (Sem juros)</option>
-                                        <option value="9">9x (Sem juros)</option>
-                                        <option value="10">10x (Sem juros)</option>
-                                        <option value="11">11x (Sem juros)</option>
-                                        <option value="12">12x (Sem juros)</option>
-                                      </select>
-                                      <div className="absolute right-6 top-1/2 -translate-y-1/2 pointer-events-none opacity-30 text-xs font-black">
-                                        ▼
-                                      </div>
-                                    </div>
-                                  </div>
-                                )}
-                                
-                                {paymentMethod === 'CREDIT' && installmentsCount > 1 && amount && !isNaN(parseFloat(amount)) && (
-                                  <div className="md:col-span-2 bg-amber-50/50 border border-amber-200/50 p-4.5 rounded-2xl">
-                                    <p className="text-[10px] font-black text-amber-700 uppercase tracking-widest leading-relaxed flex items-center gap-2">
-                                      <AlertCircle size={12} className="shrink-0 text-amber-600" strokeWidth={3} />
-                                      <span>
-                                        Sua compra será dividida em <strong>{installmentsCount} parcelas de {formatCurrency(parseFloat(amount) / installmentsCount)}</strong> mensais.
-                                      </span>
-                                    </p>
-                                    <p className="text-[9px] text-gray-400 font-extrabold uppercase mt-1.5 ml-5">
-                                      As parcelas serão lançadas automaticamente do mês selecionado até os meses subsequentes.
-                                    </p>
-                                  </div>
-                                )}
-                              </div>
-                            )}
                           </div>
                         </div>
 
@@ -1382,22 +1299,6 @@ export default function App() {
                           <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Categoria</span>
                           <span className="text-sm font-black text-black">{category}</span>
                         </div>
-                        {type === 'EXPENSE' && (
-                          <div className="flex justify-between items-center border-b border-black/5 pb-3">
-                            <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Meio de Pagamento</span>
-                            <span className="text-xs font-black uppercase tracking-widest bg-gray-100 text-gray-800 px-2.5 py-1 rounded-md">
-                              {paymentMethod === 'DEBIT' ? 'Débito' : installmentsCount > 1 ? `Crédito (${installmentsCount}x)` : 'Crédito à Vista'}
-                            </span>
-                          </div>
-                        )}
-                        {type === 'EXPENSE' && paymentMethod === 'CREDIT' && installmentsCount > 1 && (
-                          <div className="flex justify-between items-center border-b border-black/5 pb-3 bg-amber-50/30 -mx-6 px-6 py-2">
-                            <span className="text-[10px] font-black uppercase tracking-widest text-amber-700">Valor da Parcela (Mensal)</span>
-                            <span className="text-sm font-black text-amber-700">
-                              {formatCurrency(parseFloat(amount) / installmentsCount)}
-                            </span>
-                          </div>
-                        )}
                         <div className="flex justify-between items-baseline pt-1">
                           <span className="text-[10px] font-black uppercase tracking-widest text-gray-400">Valor Total</span>
                           <span className={cn(
@@ -1515,6 +1416,19 @@ export default function App() {
                             </p>
                             <p className="text-xs text-amber-700 leading-normal font-medium">
                               Esta transação representa a parcela <strong>{detailMeta.currentInstallment}/{detailMeta.totalInstallments}</strong> de uma compra realizada em <strong>{origFormatted}</strong> (não foi feita neste mês).
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Banner for installment no-deduct info */}
+                        {detailMeta.isInstallment && detailMeta.totalInstallments >= 2 && (
+                          <div className="bg-[#eff6ff] border border-[#bfdbfe] p-5 rounded-3xl text-center space-y-1 my-2">
+                            <p className="text-[10px] font-black uppercase text-[#1d4ed8] tracking-widest leading-relaxed flex items-center justify-center gap-1.5">
+                              <Info size={13} strokeWidth={3} className="shrink-0 text-[#1d4ed8]" />
+                              Controle de Parcelamento
+                            </p>
+                            <p className="text-xs text-[#1e40af] leading-normal font-medium">
+                              Esta despesa parcelada <strong>não reduz o seu saldo atual</strong>. Ela atua como um lembrete e projeção visual de despesa futura para ajudar no seu planejamento.
                             </p>
                           </div>
                         )}
